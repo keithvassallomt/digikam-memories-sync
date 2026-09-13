@@ -1,0 +1,16 @@
+{
+  "name": "keithvassallo/digikam-face-sync",
+  "description": "Nextcloud endpoint for importing digiKam face rectangles into Recognize",
+  "license": "AGPL-3.0-or-later",
+  "require": {
+    "php": ">=8.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "OCA\\DigikamFaceSync\\": "lib/"
+    }
+  },
+  "scripts": {
+    "lint": "find . -name '*.php' -print0 | xargs -0 -n1 php -l"
+  }
+}

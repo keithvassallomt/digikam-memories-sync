@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.sync_sessions/
+*.log
+
+# Local settings and credentials
+config.yaml
+config.json
+
+# Generated experiments and the old reference workspaces
+dry-run-*
+gail-*
+run-dry-run.py
+run-gail-create-smoke.py
+face-sync-ui-prototypes.html
+/upstream/
+/recognize/
+/digikam_face_sync/

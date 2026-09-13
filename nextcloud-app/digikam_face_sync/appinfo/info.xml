@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	  xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+	<id>digikam_face_sync</id>
+	<name>digiKam Face Sync</name>
+	<summary>Imports verified digiKam face rectangles into Recognize</summary>
+	<description><![CDATA[
+Adds an authenticated API for importing face rectangles from digiKam. Face
+descriptors are generated locally with the model installed by Recognize.
+	]]></description>
+	<version>0.1.2</version>
+	<licence>agpl</licence>
+	<author mail="keith@vassallo.cloud">Keith Vassallo</author>
+	<namespace>DigikamFaceSync</namespace>
+	<types>
+		<filesystem/>
+	</types>
+	<category>integration</category>
+	<category>multimedia</category>
+	<dependencies>
+		<php min-version="8.2"/>
+		<nextcloud min-version="34" max-version="34"/>
+	</dependencies>
+</info>

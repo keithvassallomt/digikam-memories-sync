@@ -1,0 +1,67 @@
+# Copy to config.yaml and adjust. Keep secrets out of git.
+
+# Preferred access: HTTP (WebDAV + Recognize DAV)
+backend: http
+
+# Path to digiKam core database (digikam4.db)
+digikam_db: /home/you/.local/share/digikam/digikam4.db
+
+# Nextcloud username (Recognize faces are per-user)
+nc_user: alice
+
+# ---------------------------------------------------------------------------
+# HTTP backend (preferred)
+# ---------------------------------------------------------------------------
+nextcloud_url: https://cloud.example.com
+# App password — or set env NEXTCLOUD_PASSWORD
+nc_password: "xxxx-xxxx-xxxx-xxxx"
+# Optional: only if auto-fetch from Photos fails (keys expire ~24h)
+# recognize_api_key: ""
+# Or disable server-side: occ config:app:set recognize require_api_key --value false
+verify_ssl: true
+
+# Concurrent keep-alive WebDAV workers (raise if CPU/network allow)
+http_workers: 16
+
+# ---------------------------------------------------------------------------
+# Optional DB backend (SQL, optional SSH tunnel)
+# ---------------------------------------------------------------------------
+# backend: db
+# nextcloud_dsn: postgresql://nextcloud:secret@127.0.0.1:5432/nextcloud
+# table_prefix: oc_
+# ssh:
+#   enabled: true
+#   host: nextcloud-server.example.com
+#   user: cliff
+#   identity_file: ~/.ssh/id_ed25519
+
+# ---------------------------------------------------------------------------
+# Matching
+# ---------------------------------------------------------------------------
+
+# Used mainly by DB listing; HTTP resolves digiKam paths via path_maps only
+nc_path_prefix: files/
+
+# Map digiKam filesystem paths → Nextcloud user-relative paths (critical for HTTP)
+path_maps:
+  - from: /mnt/photos/Family
+    to: Family
+  # - from: /home/you/Nextcloud/Photos
+  #   to: Photos
+
+iou_threshold: 0.4
+skip_persons: []
+# only_person: Alice          # only this digiKam person (tests / quick updates)
+
+# Large libraries: assign names only (Recognize must already have face boxes)
+insert_missing: false
+prefer_digikam_on_conflict: true
+
+# Scale (~500k faces): stream digiKam in batches; report detail is capped
+batch_size: 500
+# limit_images: 1000          # smoke-test subset
+max_report_actions: 2000
+
+# Session state for cancel / resume (JSON under this directory)
+# state_dir: .sync_sessions
+# Override with --session-id / --resume / --state-dir / --no-session
