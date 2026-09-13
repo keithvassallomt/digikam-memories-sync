@@ -42,9 +42,15 @@ The HTTP client checks the server during connection:
 ```bash
 python -m pip install -e .
 python -m unittest discover -s tests -v
-python sync_faces.py --config config.yaml
+face-sync                         # guided local interface
+face-sync run --config config.yaml # current command-line sync
 ```
 
 Command-line runs are previews unless `--apply` is supplied. The desktop
 release will not be marked usable until synchronization works in both
 directions.
+
+The current interface implements first-run setup: digiKam database discovery,
+saved settings and credentials, and the Recognize/Face Sync connection checks.
+The scope, preview, conflict and apply screens will be connected as the
+two-way engine is completed.

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="face-sync-token" content="__FACE_SYNC_TOKEN__">
+  <title>Face Sync</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo" aria-hidden="true">◎</span><div><strong>Face Sync</strong><small>digiKam ↔ Memories</small></div></div>
+    <div class="connection"><span class="status-dot"></span><span id="connection-label">Setup required</span></div>
+  </header>
+  <div class="shell">
+    <nav class="steps" aria-label="Setup progress">
+      <div class="step current"><span>1</span>Connect</div>
+      <div class="step"><span>2</span>Choose faces</div>
+      <div class="step"><span>3</span>Preview</div>
+      <div class="step"><span>4</span>Resolve conflicts</div>
+      <div class="step"><span>5</span>Apply</div>
+    </nav>
+    <main>
+      <section id="connect-screen" class="screen active">
+        <h1>Connect your photo libraries</h1>
+        <p class="lead">You only need to do this once. Face Sync saves these settings on this computer.</p>
+
+        <form id="setup-form">
+          <section class="card">
+            <div class="card-heading"><span class="card-icon" aria-hidden="true">▣</span><div><h2>digiKam library</h2><p>Choose the folder containing digiKam’s database.</p></div></div>
+            <label>Library folder
+              <div class="field-action"><input id="digikam-library" name="digikam_library" autocomplete="off" placeholder="/home/you/Photos" required><button id="discover-button" type="button" class="secondary">Find automatically</button></div>
+            </label>
+            <div id="digikam-result" class="inline-result" aria-live="polite"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-heading"><span class="card-icon" aria-hidden="true">☁</span><div><h2>Nextcloud</h2><p>Use a Nextcloud app password. Your normal password is not needed.</p></div></div>
+            <div class="fields">
+              <label class="wide">Nextcloud address<input id="nextcloud-url" name="nextcloud_url" type="url" placeholder="https://cloud.example.com" required></label>
+              <label>Username<input id="nc-user" name="nc_user" autocomplete="username" required></label>
+              <label>App password<input id="password" name="password" type="password" autocomplete="current-password"><small id="password-help"></small></label>
+              <label class="wide">Photos folder in Nextcloud<input id="nc-photos-path" name="nc_photos_path" value="Photos" required></label>
+            </div>
+          </section>
+
+          <div id="message" class="message" aria-live="polite"></div>
+          <section id="install-card" class="card requirement" hidden>
+            <h2>Face Sync must be installed in Nextcloud</h2>
+            <p>Recognize is working, but the companion Face Sync app is missing.</p>
+            <a id="install-link" class="button secondary" href="https://keithvassallo.com" target="_blank" rel="noopener">Open installation page</a>
+            <button id="check-again" class="secondary" type="button">Check again</button>
+          </section>
+          <div class="actions"><button id="test-button" class="secondary" type="button">Test connection</button><button id="save-button" class="primary" type="submit">Save and continue</button></div>
+        </form>
+      </section>
+
+      <section id="scope-screen" class="screen">
+        <h1>Whose faces should be checked?</h1>
+        <p class="lead">Your connection is saved. The preview step will be connected to the two-way engine next.</p>
+        <div class="scope-options">
+          <label class="scope-option"><input type="radio" name="scope" value="all"><strong>All faces</strong><span>Compare every named face in both libraries.</span></label>
+          <label class="scope-option"><input type="radio" name="scope" value="person" checked><strong>One person</strong><span>Choose one person for a quicker run.</span></label>
+        </div>
+        <div class="actions"><button id="back-button" class="secondary" type="button">Back to settings</button><button class="primary" type="button" disabled>Preview changes</button></div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -24,7 +24,10 @@ desktop = [
 ]
 
 [project.scripts]
-face-sync = "digikam_nextcloud.cli:main"
+face-sync = "digikam_nextcloud.entrypoint:main"
 
 [tool.setuptools.packages.find]
 include = ["digikam_nextcloud*"]
+
+[tool.setuptools.package-data]
+digikam_nextcloud = ["web/*.html", "web/*.css", "web/*.js"]
