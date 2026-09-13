@@ -5,6 +5,7 @@ import os
 import sqlite3
 import threading
 import logging
+import mimetypes
 from contextlib import closing
 from pathlib import Path
 from typing import Any, Callable
@@ -183,6 +184,40 @@ class AppService:
         if result is None:
             raise ValueError("Preview run not found.")
         return result
+
+    def conflicts(self, run_id: int) -> dict[str, Any]:
+        return self.state.conflicts_for_run(run_id)
+
+    def resolve_conflict(
+        self, run_id: int, conflict_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        resolution = str(payload.get("resolution", ""))
+        apply_to_remaining = payload.get("apply_to_remaining") is True
+        return self.state.resolve_conflict(
+            run_id,
+            conflict_id,
+            resolution,
+            apply_to_remaining=apply_to_remaining,
+        )
+
+    def conflict_photo(self, run_id: int, conflict_id: int) -> tuple[bytes, str]:
+        conflict = self.state.conflict_for_run(run_id, conflict_id)
+        settings = self.settings.load()
+        library_value = settings.get("digikam_library")
+        if not library_value:
+            raise ValueError("The digiKam library location is unavailable.")
+        library = Path(str(library_value)).expanduser().resolve()
+        photo = (library / str(conflict.get("path", ""))).resolve()
+        try:
+            photo.relative_to(library)
+        except ValueError as error:
+            raise ValueError("The conflict photo path is invalid.") from error
+        if not photo.is_file():
+            raise ValueError("The conflict photo is not available locally.")
+        content_type = mimetypes.guess_type(photo.name)[0] or "application/octet-stream"
+        if not content_type.startswith("image/"):
+            raise ValueError("The conflict file is not a supported image.")
+        return photo.read_bytes(), content_type
 
     def preview(self, payload: dict[str, Any], *, run_id: int | None = None) -> dict[str, Any]:
         settings = self.settings.load()

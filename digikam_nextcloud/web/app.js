@@ -3,6 +3,12 @@ const form = document.getElementById('setup-form');
 const message = document.getElementById('message');
 const installCard = document.getElementById('install-card');
 const steps = document.querySelectorAll('.step');
+let currentRunId = null;
+let currentConflicts = [];
+let currentConflictIndex = 0;
+let selectedResolution = null;
+let conflictPhotoUrl = null;
+let conflictPhotoRequest = 0;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -12,6 +18,21 @@ async function api(path, options = {}) {
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Something went wrong.');
   return body;
+}
+
+async function apiBlob(path) {
+  const response = await fetch(path, { headers: { 'X-Face-Sync-Token': token } });
+  if (!response.ok) {
+    let messageText = 'The photo could not be loaded.';
+    try {
+      const body = await response.json();
+      messageText = body.error || messageText;
+    } catch (_) {
+      // Keep the plain fallback for non-JSON failures.
+    }
+    throw new Error(messageText);
+  }
+  return response.blob();
 }
 
 function payload() {
@@ -122,6 +143,7 @@ async function loadPeople() {
 
 function showPreview(result) {
   const summary = result.summary;
+  currentRunId = result.run_id;
   document.getElementById('preview-heading').textContent = result.person ? `Preview for ${result.person}` : 'Preview for all faces';
   document.getElementById('stat-correct').textContent = summary.skipped.toLocaleString();
   document.getElementById('stat-memories').textContent = (summary.assigned + summary.inserted).toLocaleString();
@@ -136,11 +158,122 @@ function showPreview(result) {
   document.getElementById('result-create-memories').textContent = summary.inserted.toLocaleString();
   document.getElementById('result-create-digikam').textContent = summary.created_in_digikam.toLocaleString();
   document.getElementById('result-warnings').textContent = result.warnings.length.toLocaleString();
+  const reviewButton = document.getElementById('review-conflicts-button');
+  reviewButton.disabled = summary.conflicts === 0;
+  reviewButton.textContent = summary.conflicts
+    ? `Review ${summary.conflicts.toLocaleString()} conflicts`
+    : 'No conflicts to review';
   document.getElementById('scope-screen').classList.remove('active');
   document.getElementById('scan-screen').classList.remove('active');
   document.getElementById('preview-screen').classList.add('active');
   steps[1].classList.add('done');
   steps[1].classList.remove('current');
+  steps[2].classList.add('current');
+}
+
+function placeFaceBox(element, rect) {
+  element.style.left = `${100 * rect[0]}%`;
+  element.style.top = `${100 * rect[1]}%`;
+  element.style.width = `${100 * rect[2]}%`;
+  element.style.height = `${100 * rect[3]}%`;
+  element.hidden = false;
+}
+
+function chooseResolution(resolution) {
+  selectedResolution = resolution;
+  document.getElementById('keep-digikam-button').setAttribute('aria-pressed', String(resolution === 'digikam'));
+  document.getElementById('keep-memories-button').setAttribute('aria-pressed', String(resolution === 'memories'));
+  document.getElementById('save-conflict-button').disabled = false;
+}
+
+async function loadConflictPhoto(conflict) {
+  const requestNumber = ++conflictPhotoRequest;
+  const image = document.getElementById('conflict-photo');
+  const loading = document.getElementById('photo-loading');
+  const digikamBox = document.getElementById('digikam-face-box');
+  const memoriesBox = document.getElementById('memories-face-box');
+  if (conflictPhotoUrl) URL.revokeObjectURL(conflictPhotoUrl);
+  conflictPhotoUrl = null;
+  image.hidden = true;
+  image.removeAttribute('src');
+  digikamBox.hidden = true;
+  memoriesBox.hidden = true;
+  loading.hidden = false;
+  loading.textContent = 'Loading photo…';
+  try {
+    const blob = await apiBlob(`/api/runs/${currentRunId}/conflicts/${conflict.id}/photo`);
+    if (requestNumber !== conflictPhotoRequest) return;
+    conflictPhotoUrl = URL.createObjectURL(blob);
+    image.onload = () => {
+      if (requestNumber !== conflictPhotoRequest) return;
+      loading.hidden = true;
+      image.hidden = false;
+      placeFaceBox(digikamBox, conflict.digikam_rect);
+      placeFaceBox(memoriesBox, conflict.nextcloud_rect);
+    };
+    image.onerror = () => {
+      if (requestNumber !== conflictPhotoRequest) return;
+      loading.hidden = false;
+      loading.textContent = 'This photo format cannot be previewed here.';
+    };
+    image.src = conflictPhotoUrl;
+  } catch (error) {
+    if (requestNumber !== conflictPhotoRequest) return;
+    loading.hidden = false;
+    loading.textContent = error.message;
+  }
+}
+
+function showConflict(index) {
+  currentConflictIndex = index;
+  const conflict = currentConflicts[index];
+  selectedResolution = null;
+  document.getElementById('conflict-review').hidden = false;
+  document.getElementById('conflict-complete').hidden = true;
+  document.getElementById('conflict-position').textContent = `${index + 1} / ${currentConflicts.length}`;
+  const remaining = currentConflicts.filter((item) => item.status !== 'resolved').length;
+  document.getElementById('conflict-lead').textContent = `Conflict ${index + 1} of ${currentConflicts.length} · ${remaining} remaining`;
+  document.getElementById('conflict-path').textContent = conflict.path;
+  document.getElementById('conflict-overlap').textContent = `The two face boxes overlap ${Math.round(100 * conflict.iou)}%.`;
+  document.getElementById('digikam-choice-name').textContent = conflict.digikam_person || 'Unnamed';
+  document.getElementById('memories-choice-name').textContent = conflict.nextcloud_person || 'Unnamed';
+  document.getElementById('keep-digikam-button').setAttribute('aria-pressed', 'false');
+  document.getElementById('keep-memories-button').setAttribute('aria-pressed', 'false');
+  document.getElementById('save-conflict-button').disabled = true;
+  document.getElementById('apply-all-conflicts').checked = false;
+  document.getElementById('conflict-message').textContent = '';
+  document.getElementById('conflict-message').className = 'message';
+  if (conflict.resolution) chooseResolution(conflict.resolution);
+  loadConflictPhoto(conflict);
+}
+
+function showConflictComplete() {
+  document.getElementById('conflict-review').hidden = true;
+  document.getElementById('conflict-complete').hidden = false;
+  document.getElementById('conflict-complete-message').textContent = `All ${currentConflicts.length.toLocaleString()} decisions are ready for the Apply step.`;
+}
+
+async function openConflictScreen() {
+  const result = await api(`/api/runs/${currentRunId}/conflicts`);
+  currentConflicts = result.conflicts;
+  document.getElementById('preview-screen').classList.remove('active');
+  document.getElementById('conflict-screen').classList.add('active');
+  steps[2].classList.add('done');
+  steps[2].classList.remove('current');
+  steps[3].classList.add('current');
+  const firstOpen = currentConflicts.findIndex((conflict) => conflict.status !== 'resolved');
+  if (firstOpen === -1) showConflictComplete();
+  else showConflict(firstOpen);
+}
+
+function returnToPreview() {
+  conflictPhotoRequest += 1;
+  if (conflictPhotoUrl) URL.revokeObjectURL(conflictPhotoUrl);
+  conflictPhotoUrl = null;
+  document.getElementById('conflict-screen').classList.remove('active');
+  document.getElementById('preview-screen').classList.add('active');
+  steps[3].classList.remove('current');
+  steps[2].classList.remove('done');
   steps[2].classList.add('current');
 }
 
@@ -203,11 +336,12 @@ async function waitForPreview(runId) {
 }
 
 document.getElementById('preview-button').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
   const scope = document.querySelector('input[name="scope"]:checked').value;
   const person = document.getElementById('person-select').value;
   const scopeMessage = document.getElementById('scope-message');
-  event.currentTarget.disabled = true;
-  event.currentTarget.textContent = 'Starting…';
+  button.disabled = true;
+  button.textContent = 'Starting…';
   scopeMessage.textContent = '';
   scopeMessage.className = 'message';
   try {
@@ -223,8 +357,8 @@ document.getElementById('preview-button').addEventListener('click', async (event
     scopeMessage.textContent = error.message;
     scopeMessage.className = 'message error';
   } finally {
-    event.currentTarget.disabled = false;
-    event.currentTarget.textContent = 'Preview changes';
+    button.disabled = false;
+    button.textContent = 'Preview changes';
   }
 });
 
@@ -235,6 +369,61 @@ document.getElementById('preview-back-button').addEventListener('click', () => {
   steps[1].classList.remove('done');
   steps[1].classList.add('current');
 });
+
+document.getElementById('review-conflicts-button').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = 'Opening conflicts…';
+  try {
+    await openConflictScreen();
+  } catch (error) {
+    button.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    if (button.textContent === 'Opening conflicts…') button.textContent = originalText;
+  }
+});
+
+document.getElementById('keep-digikam-button').addEventListener('click', () => chooseResolution('digikam'));
+document.getElementById('keep-memories-button').addEventListener('click', () => chooseResolution('memories'));
+
+document.getElementById('save-conflict-button').addEventListener('click', async (event) => {
+  if (!selectedResolution) return;
+  const button = event.currentTarget;
+  const conflict = currentConflicts[currentConflictIndex];
+  const applyToRemaining = document.getElementById('apply-all-conflicts').checked;
+  button.disabled = true;
+  button.textContent = 'Saving…';
+  try {
+    const result = await api(`/api/runs/${currentRunId}/conflicts/${conflict.id}`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution: selectedResolution, apply_to_remaining: applyToRemaining }),
+    });
+    currentConflicts = result.conflicts;
+    const laterOpen = currentConflicts.findIndex((item, index) => index > currentConflictIndex && item.status !== 'resolved');
+    const nextOpen = laterOpen >= 0
+      ? laterOpen
+      : currentConflicts.findIndex((item) => item.status !== 'resolved');
+    if (nextOpen === -1) showConflictComplete();
+    else showConflict(nextOpen);
+  } catch (error) {
+    const conflictMessage = document.getElementById('conflict-message');
+    conflictMessage.textContent = error.message;
+    conflictMessage.className = 'message error';
+    button.disabled = false;
+  } finally {
+    button.textContent = 'Save choice and continue';
+  }
+});
+
+document.getElementById('conflict-back-button').addEventListener('click', () => {
+  if (currentConflictIndex > 0) showConflict(currentConflictIndex - 1);
+  else returnToPreview();
+});
+
+document.getElementById('conflict-complete-back').addEventListener('click', returnToPreview);
+document.getElementById('review-decisions-button').addEventListener('click', () => showConflict(0));
 
 async function loadSettings() {
   const settings = await api('/api/settings');

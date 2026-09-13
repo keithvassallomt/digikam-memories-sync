@@ -106,7 +106,41 @@
             <li><span>Warnings</span><strong id="result-warnings">0</strong></li>
           </ul>
         </section>
-        <div class="actions"><button id="preview-back-button" class="secondary" type="button">Back</button><button class="primary" type="button" disabled>Apply changes</button></div>
+        <div class="actions"><button id="preview-back-button" class="secondary" type="button">Back</button><button id="review-conflicts-button" class="primary" type="button" disabled>No conflicts to review</button></div>
+      </section>
+
+      <section id="conflict-screen" class="screen">
+        <div id="conflict-review">
+          <div class="conflict-heading">
+            <div><h1>Who is this?</h1><p id="conflict-lead" class="lead">Choose the correct name for the highlighted face.</p></div>
+            <strong id="conflict-position" class="conflict-position"></strong>
+          </div>
+          <div class="conflict-grid">
+            <div>
+              <div id="conflict-photo-frame" class="conflict-photo-frame">
+                <span id="photo-loading" class="photo-message">Loading photo…</span>
+                <img id="conflict-photo" alt="" hidden>
+                <span id="digikam-face-box" class="face-box digikam-box" hidden><small>digiKam</small></span>
+                <span id="memories-face-box" class="face-box memories-box" hidden><small>Memories</small></span>
+              </div>
+              <p id="conflict-path" class="photo-caption"></p>
+              <p id="conflict-overlap" class="photo-caption"></p>
+            </div>
+            <div>
+              <button id="keep-digikam-button" class="name-choice" type="button" aria-pressed="false"><span><strong id="digikam-choice-name"></strong><small>Keep the name from digiKam</small></span></button>
+              <button id="keep-memories-button" class="name-choice" type="button" aria-pressed="false"><span><strong id="memories-choice-name"></strong><small>Keep the name from Memories</small></span></button>
+              <label class="apply-all"><input id="apply-all-conflicts" type="checkbox"><span><strong>Use this choice for all remaining conflicts</strong><small>Every unresolved conflict will receive the same choice.</small></span></label>
+            </div>
+          </div>
+          <div id="conflict-message" class="message" aria-live="polite"></div>
+          <div class="actions"><button id="conflict-back-button" class="secondary" type="button">Back</button><button id="save-conflict-button" class="primary" type="button" disabled>Save choice and continue</button></div>
+        </div>
+        <div id="conflict-complete" hidden>
+          <h1>Conflicts resolved</h1>
+          <p id="conflict-complete-message" class="lead"></p>
+          <section class="card"><p class="completion-mark" aria-hidden="true">✓</p><h2>Your decisions are saved</h2><p>Nothing has been changed in digiKam or Memories yet.</p></section>
+          <div class="actions"><button id="conflict-complete-back" class="secondary" type="button">Back to preview</button><button id="review-decisions-button" class="secondary" type="button">Review decisions</button><button class="primary" type="button" disabled>Apply changes</button></div>
+        </div>
       </section>
     </main>
   </div>

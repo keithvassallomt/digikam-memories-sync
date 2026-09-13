@@ -56,8 +56,24 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
             )
         elif path.startswith("/api/runs/"):
             try:
-                run_id = int(path.removeprefix("/api/runs/"))
-                self._json(HTTPStatus.OK, self.server.app.preview_status(run_id))
+                parts = path.strip("/").split("/")
+                run_id = int(parts[2])
+                if len(parts) == 3:
+                    self._json(HTTPStatus.OK, self.server.app.preview_status(run_id))
+                elif len(parts) == 4 and parts[3] == "conflicts":
+                    self._json(HTTPStatus.OK, self.server.app.conflicts(run_id))
+                elif (
+                    len(parts) == 6
+                    and parts[3] == "conflicts"
+                    and parts[5] == "photo"
+                ):
+                    conflict_id = int(parts[4])
+                    body, content_type = self.server.app.conflict_photo(
+                        run_id, conflict_id
+                    )
+                    self._bytes(HTTPStatus.OK, body, content_type)
+                else:
+                    raise ValueError("Preview resource not found.")
             except ValueError as error:
                 self._json(HTTPStatus.NOT_FOUND, {"error": str(error)})
         elif path == "/" or path == "/index.html":
@@ -80,6 +96,17 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.server.app.save_settings(payload))
             elif path == "/api/preview":
                 self._json(HTTPStatus.ACCEPTED, self.server.app.start_preview(payload))
+            elif path.startswith("/api/runs/"):
+                parts = path.strip("/").split("/")
+                if len(parts) != 5 or parts[3] != "conflicts":
+                    self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
+                    return
+                self._json(
+                    HTTPStatus.OK,
+                    self.server.app.resolve_conflict(
+                        int(parts[2]), int(parts[4]), payload
+                    ),
+                )
             else:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
         except RecognizeNotInstalledError as error:
@@ -134,7 +161,11 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' blob:; style-src 'self'; "
+            "script-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+        )
         self.end_headers()
         self.wfile.write(body)
 

@@ -169,6 +169,73 @@ class StateStore:
             )
             self.conn.commit()
 
+    def conflicts_for_run(self, run_id: int) -> dict[str, Any]:
+        with self.lock:
+            run = self.conn.execute("SELECT id FROM runs WHERE id = ?", (run_id,)).fetchone()
+            if run is None:
+                raise ValueError("Preview run not found.")
+            rows = self.conn.execute(
+                "SELECT * FROM conflicts WHERE run_id = ? ORDER BY id",
+                (run_id,),
+            ).fetchall()
+        conflicts = []
+        for row in rows:
+            item = json.loads(row["detail_json"] or "{}")
+            item.update(
+                {
+                    "id": int(row["id"]),
+                    "run_id": int(row["run_id"]),
+                    "status": row["status"],
+                    "resolution": row["resolution"],
+                }
+            )
+            conflicts.append(item)
+        resolved = sum(item["status"] == "resolved" for item in conflicts)
+        return {
+            "conflicts": conflicts,
+            "total": len(conflicts),
+            "resolved": resolved,
+            "remaining": len(conflicts) - resolved,
+        }
+
+    def conflict_for_run(self, run_id: int, conflict_id: int) -> dict[str, Any]:
+        result = self.conflicts_for_run(run_id)
+        for conflict in result["conflicts"]:
+            if conflict["id"] == conflict_id:
+                return conflict
+        raise ValueError("Conflict not found.")
+
+    def resolve_conflict(
+        self,
+        run_id: int,
+        conflict_id: int,
+        resolution: str,
+        *,
+        apply_to_remaining: bool = False,
+    ) -> dict[str, Any]:
+        if resolution not in {"digikam", "memories"}:
+            raise ValueError("Choose either digiKam or Memories.")
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT id FROM conflicts WHERE id = ? AND run_id = ?",
+                (conflict_id, run_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Conflict not found.")
+            self.conn.execute(
+                """UPDATE conflicts SET status = 'resolved', resolution = ?
+                   WHERE id = ? AND run_id = ?""",
+                (resolution, conflict_id, run_id),
+            )
+            if apply_to_remaining:
+                self.conn.execute(
+                    """UPDATE conflicts SET status = 'resolved', resolution = ?
+                       WHERE run_id = ? AND status = 'open'""",
+                    (resolution, run_id),
+                )
+            self.conn.commit()
+        return self.conflicts_for_run(run_id)
+
     def run(self, run_id: int) -> dict[str, Any] | None:
         with self.lock:
             row = self.conn.execute(

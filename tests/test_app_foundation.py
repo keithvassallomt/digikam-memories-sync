@@ -109,6 +109,71 @@ class AppFoundationTests(unittest.TestCase):
         finally:
             state.close()
 
+    def test_conflict_choices_are_persisted_and_can_resolve_all_remaining(self):
+        state = StateStore(self.root / "state.sqlite3")
+        try:
+            run_id = state.create_run("person")
+            state.save_conflicts(
+                run_id,
+                [
+                    {"path": "2026/one.jpg", "digikam_person": "Gail", "nextcloud_person": "Angie"},
+                    {"path": "2026/two.jpg", "digikam_person": "Gail", "nextcloud_person": "April"},
+                ],
+            )
+            conflicts = state.conflicts_for_run(run_id)
+            first_id = conflicts["conflicts"][0]["id"]
+
+            resolved = state.resolve_conflict(
+                run_id,
+                first_id,
+                "digikam",
+                apply_to_remaining=True,
+            )
+
+            self.assertEqual(resolved["resolved"], 2)
+            self.assertEqual(resolved["remaining"], 0)
+            self.assertTrue(
+                all(item["resolution"] == "digikam" for item in resolved["conflicts"])
+            )
+        finally:
+            state.close()
+
+    def test_conflict_photo_is_limited_to_the_configured_library(self):
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        settings.save(
+            {
+                "digikam_library": str(self.library),
+                "digikam_db": str(self.library / "digikam4.db"),
+                "nextcloud_url": "https://cloud.test",
+                "nc_user": "keith",
+                "nc_photos_path": "Photos",
+            },
+            "secret",
+        )
+        photo_dir = self.library / "2026"
+        photo_dir.mkdir()
+        photo = photo_dir / "photo.jpg"
+        photo.write_bytes(b"test-image")
+        outside = self.root / "outside.jpg"
+        outside.write_bytes(b"private")
+        state = StateStore(self.root / "state.sqlite3")
+        service = AppService(settings, state)
+        try:
+            run_id = state.create_run("person")
+            state.save_conflicts(run_id, [{"path": "2026/photo.jpg"}])
+            conflict_id = state.conflicts_for_run(run_id)["conflicts"][0]["id"]
+            body, content_type = service.conflict_photo(run_id, conflict_id)
+            self.assertEqual(body, b"test-image")
+            self.assertEqual(content_type, "image/jpeg")
+
+            other_run = state.create_run("person")
+            state.save_conflicts(other_run, [{"path": "../outside.jpg"}])
+            other_id = state.conflicts_for_run(other_run)["conflicts"][0]["id"]
+            with self.assertRaisesRegex(ValueError, "path is invalid"):
+                service.conflict_photo(other_run, other_id)
+        finally:
+            state.close()
+
     def test_connection_result_guides_missing_companion_app(self):
         settings = SettingsStore(self.root / "config", use_keyring=False)
         state = StateStore(self.root / "state.sqlite3")
@@ -150,6 +215,73 @@ class AppFoundationTests(unittest.TestCase):
             )
             with urllib.request.urlopen(request) as response:
                 self.assertEqual(json.load(response), {"status": "ok"})
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+            state.close()
+
+    def test_local_api_lists_resolves_and_serves_conflict_photos(self):
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        settings.save(
+            {
+                "digikam_library": str(self.library),
+                "digikam_db": str(self.library / "digikam4.db"),
+                "nextcloud_url": "https://cloud.test",
+                "nc_user": "keith",
+            },
+            "secret",
+        )
+        photo_dir = self.library / "2026"
+        photo_dir.mkdir()
+        (photo_dir / "photo.jpg").write_bytes(b"photo-bytes")
+        state = StateStore(self.root / "state.sqlite3")
+        run_id = state.create_run("person")
+        state.save_conflicts(
+            run_id,
+            [
+                {
+                    "path": "2026/photo.jpg",
+                    "digikam_person": "Gail Vassallo",
+                    "nextcloud_person": "Angie Galea",
+                    "digikam_rect": [0.1, 0.2, 0.3, 0.4],
+                    "nextcloud_rect": [0.1, 0.2, 0.3, 0.4],
+                    "iou": 1.0,
+                }
+            ],
+        )
+        service = AppService(settings, state)
+        server = FaceSyncHTTPServer(("127.0.0.1", 0), service)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}/api/runs/{run_id}/conflicts"
+        headers = {"X-Face-Sync-Token": server.api_token}
+        try:
+            request = urllib.request.Request(base, headers=headers)
+            with urllib.request.urlopen(request) as response:
+                listing = json.load(response)
+            conflict_id = listing["conflicts"][0]["id"]
+
+            payload = json.dumps(
+                {"resolution": "memories", "apply_to_remaining": False}
+            ).encode()
+            request = urllib.request.Request(
+                f"{base}/{conflict_id}",
+                data=payload,
+                method="POST",
+                headers={**headers, "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request) as response:
+                resolved = json.load(response)
+            self.assertEqual(resolved["remaining"], 0)
+            self.assertEqual(resolved["conflicts"][0]["resolution"], "memories")
+
+            request = urllib.request.Request(
+                f"{base}/{conflict_id}/photo", headers=headers
+            )
+            with urllib.request.urlopen(request) as response:
+                self.assertEqual(response.read(), b"photo-bytes")
+                self.assertEqual(response.headers.get_content_type(), "image/jpeg")
         finally:
             server.shutdown()
             thread.join(timeout=2)
