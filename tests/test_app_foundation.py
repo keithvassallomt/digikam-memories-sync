@@ -201,6 +201,65 @@ class AppFoundationTests(unittest.TestCase):
         finally:
             state.close()
 
+    def test_background_preview_exposes_measured_progress(self):
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        settings.save(
+            {
+                "digikam_library": str(self.library),
+                "digikam_db": str(self.library / "digikam4.db"),
+                "nextcloud_url": "https://cloud.test",
+                "nc_user": "keith",
+                "nc_photos_path": "Photos",
+            },
+            "secret",
+        )
+        state = StateStore(self.root / "state.sqlite3")
+        backend = FakeBackend(NextcloudRequirements(True, True, "https://install.test"))
+        reached_first_batch = threading.Event()
+        finish = threading.Event()
+
+        def fake_sync(*args, **kwargs):
+            kwargs["progress_callback"](
+                {
+                    "phase": "scanning",
+                    "current": 4,
+                    "total": 10,
+                    "matched": 4,
+                    "assigned": 2,
+                    "inserted": 1,
+                    "skipped": 1,
+                    "conflicts": 0,
+                }
+            )
+            reached_first_batch.set()
+            finish.wait(timeout=2)
+            return SyncReport(files_digikam=10, files_matched=10, skipped=10)
+
+        service = AppService(
+            settings,
+            state,
+            backend_factory=lambda *a, **k: backend,
+            digikam_factory=FakeDigikam,
+            sync_function=fake_sync,
+        )
+        try:
+            job = service.start_preview({"scope": "person", "person": "Gail Vassallo"})
+            self.assertTrue(reached_first_batch.wait(timeout=2))
+            running = service.preview_status(job["run_id"])
+            self.assertEqual(running["progress"]["current"], 4)
+            self.assertEqual(running["progress"]["total"], 10)
+            self.assertEqual(running["progress"]["matched"], 4)
+            thread = service._jobs[job["run_id"]]
+            finish.set()
+            thread.join(timeout=2)
+            completed = service.preview_status(job["run_id"])
+            self.assertEqual(completed["status"], "previewed")
+            self.assertEqual(completed["progress"]["current"], 10)
+            self.assertEqual(completed["progress"]["total"], 10)
+        finally:
+            finish.set()
+            state.close()
+
 
 if __name__ == "__main__":
     unittest.main()

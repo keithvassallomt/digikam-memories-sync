@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     read_at TEXT
 );
+CREATE TABLE IF NOT EXISTS run_progress (
+    run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL,
+    current INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0,
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS run_results (
+    run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    result_json TEXT NOT NULL
+);
 """
 
 
@@ -104,8 +117,40 @@ class StateStore:
                 "INSERT INTO runs(profile_id, mode, status) VALUES (1, ?, ?)",
                 (mode, status),
             )
+            run_id = int(cursor.lastrowid)
+            self.conn.execute(
+                "INSERT INTO run_progress(run_id, phase) VALUES (?, 'starting')",
+                (run_id,),
+            )
             self.conn.commit()
-            return int(cursor.lastrowid)
+            return run_id
+
+    def update_progress(
+        self,
+        run_id: int,
+        phase: str,
+        current: int,
+        total: int,
+        detail: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        with self.lock:
+            self.conn.execute(
+                """UPDATE run_progress SET phase = ?, current = ?, total = ?,
+                   detail_json = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE run_id = ?""",
+                (phase, current, total, json.dumps(detail or {}), error, run_id),
+            )
+            self.conn.commit()
+
+    def save_result(self, run_id: int, result: dict[str, Any]) -> None:
+        with self.lock:
+            self.conn.execute(
+                """INSERT INTO run_results(run_id, result_json) VALUES (?, ?)
+                   ON CONFLICT(run_id) DO UPDATE SET result_json = excluded.result_json""",
+                (run_id, json.dumps(result)),
+            )
+            self.conn.commit()
 
     def finish_run(self, run_id: int, status: str, summary: dict[str, Any]) -> None:
         with self.lock:
@@ -126,9 +171,25 @@ class StateStore:
 
     def run(self, run_id: int) -> dict[str, Any] | None:
         with self.lock:
-            row = self.conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+            row = self.conn.execute(
+                """SELECT r.*, p.phase, p.current, p.total, p.detail_json,
+                          p.error, rr.result_json
+                   FROM runs r
+                   LEFT JOIN run_progress p ON p.run_id = r.id
+                   LEFT JOIN run_results rr ON rr.run_id = r.id
+                   WHERE r.id = ?""",
+                (run_id,),
+            ).fetchone()
         if row is None:
             return None
         result = dict(row)
         result["summary"] = json.loads(result.pop("summary_json"))
+        result["progress"] = {
+            "phase": result.pop("phase"),
+            "current": result.pop("current"),
+            "total": result.pop("total"),
+            **json.loads(result.pop("detail_json") or "{}"),
+        }
+        raw_result = result.pop("result_json")
+        result["result"] = json.loads(raw_result) if raw_result else None
         return result

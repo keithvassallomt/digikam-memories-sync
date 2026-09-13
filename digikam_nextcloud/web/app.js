@@ -132,10 +132,58 @@ function showPreview(result) {
   document.getElementById('result-unmatched').textContent = summary.files_unmatched_digikam.toLocaleString();
   document.getElementById('result-warnings').textContent = result.warnings.length.toLocaleString();
   document.getElementById('scope-screen').classList.remove('active');
+  document.getElementById('scan-screen').classList.remove('active');
   document.getElementById('preview-screen').classList.add('active');
   steps[1].classList.add('done');
   steps[1].classList.remove('current');
   steps[2].classList.add('current');
+}
+
+function showScan() {
+  document.getElementById('scope-screen').classList.remove('active');
+  document.getElementById('scan-screen').classList.add('active');
+  steps[1].classList.add('done');
+  steps[1].classList.remove('current');
+  steps[2].classList.add('current');
+  const progress = document.getElementById('scan-progress');
+  progress.removeAttribute('value');
+  progress.removeAttribute('max');
+  document.getElementById('scan-phase').textContent = 'Counting the selected digiKam photos…';
+  document.getElementById('progress-percent').textContent = 'Preparing…';
+  document.getElementById('progress-count').textContent = 'Counting photos';
+}
+
+function updateProgress(status) {
+  const data = status.progress;
+  const progress = document.getElementById('scan-progress');
+  if (data.total > 0) {
+    progress.max = data.total;
+    progress.value = Math.min(data.current, data.total);
+    const percent = Math.floor((100 * data.current) / data.total);
+    document.getElementById('progress-percent').textContent = `${percent}%`;
+    document.getElementById('progress-count').textContent = `${data.current.toLocaleString()} of ${data.total.toLocaleString()} photos`;
+    document.getElementById('scan-phase').textContent = 'Comparing face rectangles and names with Nextcloud…';
+  }
+  document.getElementById('live-matched').textContent = (data.matched || 0).toLocaleString();
+  document.getElementById('live-changes').textContent = ((data.assigned || 0) + (data.inserted || 0)).toLocaleString();
+  document.getElementById('live-conflicts').textContent = (data.conflicts || 0).toLocaleString();
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForPreview(runId) {
+  while (true) {
+    const status = await api(`/api/runs/${runId}`);
+    updateProgress(status);
+    if (status.status === 'previewed') {
+      showPreview(status.result);
+      return;
+    }
+    if (status.status === 'failed') throw new Error(status.error || 'The preview failed.');
+    await wait(750);
+  }
 }
 
 document.getElementById('preview-button').addEventListener('click', async (event) => {
@@ -143,13 +191,19 @@ document.getElementById('preview-button').addEventListener('click', async (event
   const person = document.getElementById('person-select').value;
   const scopeMessage = document.getElementById('scope-message');
   event.currentTarget.disabled = true;
-  event.currentTarget.textContent = 'Checking faces…';
-  scopeMessage.textContent = 'This can take a few minutes. You can leave this page open.';
-  scopeMessage.className = 'message success';
+  event.currentTarget.textContent = 'Starting…';
+  scopeMessage.textContent = '';
+  scopeMessage.className = 'message';
   try {
-    const result = await api('/api/preview', { method: 'POST', body: JSON.stringify({ scope, person }) });
-    showPreview(result);
+    const job = await api('/api/preview', { method: 'POST', body: JSON.stringify({ scope, person }) });
+    showScan();
+    await waitForPreview(job.run_id);
   } catch (error) {
+    document.getElementById('scan-screen').classList.remove('active');
+    document.getElementById('scope-screen').classList.add('active');
+    steps[2].classList.remove('current');
+    steps[1].classList.remove('done');
+    steps[1].classList.add('current');
     scopeMessage.textContent = error.message;
     scopeMessage.className = 'message error';
   } finally {

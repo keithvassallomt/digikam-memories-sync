@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import signal
 import time
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from .constants import DEFAULT_SKIP_PERSONS
 from .digikam import DigikamDB
@@ -287,6 +287,7 @@ def sync(
     max_warnings: int = DEFAULT_MAX_WARNINGS,
     http_workers: int = 16,
     session: Optional[SessionState] = None,
+    progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> SyncReport:
     """
     Sync digiKam faces → Nextcloud in image batches.
@@ -304,6 +305,24 @@ def sync(
     report = SyncReport()
     t_start = time.monotonic()
     cancelled = False
+
+    def publish_progress(phase: str, current: int, total: int) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(
+            {
+                "phase": phase,
+                "current": current,
+                "total": total,
+                "matched": report.files_matched,
+                "assigned": report.assigned,
+                "inserted": report.inserted,
+                "skipped": report.skipped,
+                "conflicts": report.conflict_count,
+            }
+        )
+
+    publish_progress("indexing", 0, 0)
 
     # Seed counters from a previous partial run
     if session is not None:
@@ -377,6 +396,8 @@ def sync(
     if limit_images is not None:
         LOG.info("Limiting to first %d images (--limit-images)", limit_images)
         total_images = min(total_images, limit_images)
+
+    publish_progress("scanning", 0, total_images)
 
     if session is not None:
         session.set_total_images(total_images)
@@ -722,6 +743,7 @@ def sync(
                 rate,
                 f"{eta:.0f}s" if rate > 0 else "?",
             )
+            publish_progress("scanning", images_done, total_images)
 
             if cancelled:
                 break
@@ -779,6 +801,7 @@ def sync(
         if session is not None:
             session.update_report_from_sync_report(report)
             session.finish("completed", "ok")
+        publish_progress("completed", total_images, total_images)
         return report
 
     except SyncCancelled:

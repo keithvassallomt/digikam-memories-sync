@@ -67,6 +67,21 @@
         <div class="actions"><button id="back-button" class="secondary" type="button">Back to settings</button><button id="preview-button" class="primary" type="button">Preview changes</button></div>
       </section>
 
+      <section id="scan-screen" class="screen">
+        <h1>Checking faces</h1>
+        <p id="scan-phase" class="lead">Preparing the photo list…</p>
+        <section class="card scan-card">
+          <div class="progress-heading"><strong id="progress-percent">Preparing…</strong><span id="progress-count">Counting photos</span></div>
+          <progress id="scan-progress" aria-label="Photo scan progress"></progress>
+          <div class="live-counts" aria-live="polite">
+            <span><strong id="live-matched">0</strong> matched</span>
+            <span><strong id="live-changes">0</strong> changes</span>
+            <span><strong id="live-conflicts">0</strong> conflicts</span>
+          </div>
+        </section>
+        <p class="notice">Progress uses the actual number of selected digiKam photos. It advances only when a batch has finished comparing with Nextcloud.</p>
+      </section>
+
       <section id="preview-screen" class="screen">
         <h1 id="preview-heading">Preview</h1>
         <p class="lead">No changes were made. Review the result before anything is applied.</p>

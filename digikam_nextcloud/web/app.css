@@ -79,6 +79,13 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .results { margin: 12px 0 0; padding: 0; }
 .results li { border-top: 1px solid var(--line); display: flex; justify-content: space-between; list-style: none; padding: 12px 0; }
 .results strong { font-weight: 500; }
+.scan-card { padding: 24px; }
+.progress-heading { align-items: center; display: flex; justify-content: space-between; margin-bottom: 12px; }
+.progress-heading strong { font-size: 20px; font-weight: 500; }
+.progress-heading span { color: var(--muted); font-size: 13px; }
+progress { accent-color: var(--brand); display: block; height: 18px; width: 100%; }
+.live-counts { color: var(--muted); display: flex; flex-wrap: wrap; gap: 20px; margin-top: 14px; }
+.live-counts strong { color: var(--ink); font-weight: 500; }
 [hidden] { display: none !important; }
 @media (max-width: 720px) {
   .shell { display: block; }

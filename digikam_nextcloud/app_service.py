@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
+import logging
 from contextlib import closing
 from pathlib import Path
 from typing import Any, Callable
@@ -14,6 +16,7 @@ from .state_store import StateStore
 from .sync import sync
 
 REQUIRED_DIGIKAM_TABLES = {"Images", "Tags", "TagProperties", "ImageTagProperties"}
+LOG = logging.getLogger(__name__)
 
 
 class InvalidDigikamLibrary(ValueError):
@@ -73,6 +76,8 @@ class AppService:
         self.backend_factory = backend_factory
         self.digikam_factory = digikam_factory
         self.sync_function = sync_function
+        self._job_lock = threading.Lock()
+        self._jobs: dict[int, threading.Thread] = {}
 
     def public_settings(self) -> dict[str, Any]:
         return self.settings.public_settings()
@@ -122,22 +127,62 @@ class AppService:
         with self.digikam_factory(database) as digikam:
             return sorted(set(digikam.person_tag_ids().values()), key=str.casefold)
 
-    def preview(self, payload: dict[str, Any]) -> dict[str, Any]:
-        settings = self.settings.load()
-        if not settings.get("digikam_db"):
-            raise ValueError("Complete the connection setup first.")
+    @staticmethod
+    def _preview_selection(payload: dict[str, Any]) -> tuple[str, str]:
         scope = str(payload.get("scope", "person"))
         if scope not in {"all", "person"}:
             raise ValueError("Choose All faces or One person.")
         person = str(payload.get("person", "")).strip() if scope == "person" else ""
         if scope == "person" and not person:
             raise ValueError("Choose a person.")
+        return scope, person
+
+    def start_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.settings.load().get("digikam_db"):
+            raise ValueError("Complete the connection setup first.")
+        scope, person = self._preview_selection(payload)
+        with self._job_lock:
+            active = [run_id for run_id, thread in self._jobs.items() if thread.is_alive()]
+            if active:
+                raise ValueError(f"Preview {active[0]} is already running.")
+            run_id = self.state.create_run(scope)
+            thread = threading.Thread(
+                target=self._preview_job,
+                args=(run_id, {"scope": scope, "person": person}),
+                name=f"face-sync-preview-{run_id}",
+                daemon=True,
+            )
+            self._jobs[run_id] = thread
+            thread.start()
+        return {"run_id": run_id, "status": "previewing"}
+
+    def _preview_job(self, run_id: int, payload: dict[str, Any]) -> None:
+        try:
+            self.preview(payload, run_id=run_id)
+        except Exception:
+            LOG.exception("Preview %s failed", run_id)
+        finally:
+            with self._job_lock:
+                self._jobs.pop(run_id, None)
+
+    def preview_status(self, run_id: int) -> dict[str, Any]:
+        result = self.state.run(run_id)
+        if result is None:
+            raise ValueError("Preview run not found.")
+        return result
+
+    def preview(self, payload: dict[str, Any], *, run_id: int | None = None) -> dict[str, Any]:
+        settings = self.settings.load()
+        if not settings.get("digikam_db"):
+            raise ValueError("Complete the connection setup first.")
+        scope, person = self._preview_selection(payload)
 
         user_id = str(settings["nc_user"])
         password = self.settings.password(user_id)
         if not password:
             raise ValueError("The saved Nextcloud app password is unavailable.")
-        run_id = self.state.create_run(scope)
+        if run_id is None:
+            run_id = self.state.create_run(scope)
         backend = None
         try:
             backend = self.backend_factory(
@@ -160,10 +205,26 @@ class AppService:
                     batch_size=250,
                     max_actions=5000,
                     session=None,
+                    progress_callback=lambda progress: self.state.update_progress(
+                        run_id,
+                        str(progress["phase"]),
+                        int(progress["current"]),
+                        int(progress["total"]),
+                        progress,
+                    ),
                 )
             data = report.to_dict()
             summary = data["summary"]
+            result = {
+                "run_id": run_id,
+                "scope": scope,
+                "person": person or None,
+                "direction": "digikam_to_memories",
+                **data,
+            }
+            self.state.save_result(run_id, result)
             self.state.finish_run(run_id, "previewed", summary)
+            self.state.update_progress(run_id, "completed", summary["files_digikam"], summary["files_digikam"], summary)
             self.state.save_conflicts(run_id, data["conflicts"])
             if summary["conflicts"]:
                 self.state.create_notification(
@@ -182,15 +243,10 @@ class AppService:
                     f"/runs/{run_id}",
                     run_id=run_id,
                 )
-            return {
-                "run_id": run_id,
-                "scope": scope,
-                "person": person or None,
-                "direction": "digikam_to_memories",
-                **data,
-            }
-        except Exception:
+            return result
+        except Exception as error:
             self.state.finish_run(run_id, "failed", {})
+            self.state.update_progress(run_id, "failed", 0, 0, error=str(error))
             self.state.create_notification(
                 "run.failed",
                 "Preview failed",

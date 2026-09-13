@@ -54,6 +54,12 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {"notifications": self.server.app.state.unread_notifications()},
             )
+        elif path.startswith("/api/runs/"):
+            try:
+                run_id = int(path.removeprefix("/api/runs/"))
+                self._json(HTTPStatus.OK, self.server.app.preview_status(run_id))
+            except ValueError as error:
+                self._json(HTTPStatus.NOT_FOUND, {"error": str(error)})
         elif path == "/" or path == "/index.html":
             raw = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
             raw = raw.replace("__FACE_SYNC_TOKEN__", self.server.api_token)
@@ -73,7 +79,7 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
             elif path == "/api/settings":
                 self._json(HTTPStatus.OK, self.server.app.save_settings(payload))
             elif path == "/api/preview":
-                self._json(HTTPStatus.OK, self.server.app.preview(payload))
+                self._json(HTTPStatus.ACCEPTED, self.server.app.start_preview(payload))
             else:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
         except RecognizeNotInstalledError as error:
