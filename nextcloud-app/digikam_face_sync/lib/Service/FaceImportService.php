@@ -25,8 +25,10 @@ final class FaceImportService {
 			$compatibility['reason'] = 'Recognize face database tables are missing';
 		}
 		return [
-			'apiVersion' => 1,
+			'apiVersion' => 2,
 			'createFaceDetection' => $compatibility['available'],
+			'listFaceDetections' => $this->repository->isAvailable(),
+			'listPeople' => $this->repository->isAvailable(),
 			'coordinates' => 'relative',
 			'faceVector' => 'generated-by-recognize',
 			'recognizeVersion' => $compatibility['recognizeVersion'],

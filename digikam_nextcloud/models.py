@@ -97,6 +97,14 @@ class NextcloudFile:
 
 
 @dataclass
+class NextcloudNamedFace:
+    """A named Recognize detection together with its source photo."""
+
+    file: NextcloudFile
+    face: FaceRegion
+
+
+@dataclass
 class FileMatch:
     digikam: DigikamImage
     nextcloud: NextcloudFile
@@ -113,6 +121,8 @@ class RegionConflict:
     iou: float
     nc_detection_id: Optional[int]
     nc_file_id: int
+    digikam_image_id: Optional[int] = None
+    digikam_tag_id: Optional[int] = None
 
 
 @dataclass
@@ -137,10 +147,15 @@ class SyncReport:
     faces_nextcloud: int = 0
     assigned: int = 0
     inserted: int = 0
+    created_in_digikam: int = 0
     skipped: int = 0
+    files_memories: int = 0
+    faces_memories: int = 0
+    files_unmatched_nextcloud: int = 0
     conflicts: list[RegionConflict] = field(default_factory=list)
     actions: list[RegionAction] = field(default_factory=list)
     unmatched_paths: list[str] = field(default_factory=list)
+    unmatched_nextcloud_paths: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     # Conflicts counted in earlier session segments (detail lists not restored)
     prior_conflicts: int = 0
@@ -160,12 +175,17 @@ class SyncReport:
                 "faces_nextcloud": self.faces_nextcloud,
                 "assigned": self.assigned,
                 "inserted": self.inserted,
+                "created_in_digikam": self.created_in_digikam,
                 "skipped": self.skipped,
                 "conflicts": self.conflict_count,
+                "files_memories": self.files_memories,
+                "faces_memories": self.faces_memories,
+                "files_unmatched_nextcloud": self.files_unmatched_nextcloud,
             },
             "conflicts": [asdict(c) for c in self.conflicts],
             "actions": [asdict(a) for a in self.actions],
             "unmatched_paths": self.unmatched_paths,
+            "unmatched_nextcloud_paths": self.unmatched_nextcloud_paths,
             "warnings": self.warnings,
         }
 

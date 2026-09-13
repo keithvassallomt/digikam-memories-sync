@@ -1,0 +1,167 @@
+"""Preview named Memories/Recognize faces that are missing from digiKam."""
+from __future__ import annotations
+
+from collections import defaultdict
+from typing import Any, Callable, Iterable, Optional
+
+from .constants import DEFAULT_SKIP_PERSONS
+from .digikam import DigikamDB
+from .matching import match_regions
+from .models import (
+    NextcloudNamedFace,
+    RegionAction,
+    RegionConflict,
+    SyncReport,
+)
+from .names import person_names_match, sanitize_person_name
+from .paths import normalize_path
+
+
+def _library_relative_path(path: str, nextcloud_photos_path: str) -> Optional[str]:
+    remote = normalize_path(path).strip("/")
+    prefix = normalize_path(nextcloud_photos_path).strip("/")
+    if not prefix:
+        return remote or None
+    if remote.lower() == prefix.lower():
+        return None
+    marker = prefix + "/"
+    if not remote.lower().startswith(marker.lower()):
+        return None
+    return remote[len(marker) :]
+
+
+def selected_memories_faces(
+    faces: Iterable[NextcloudNamedFace],
+    *,
+    nextcloud_photos_path: str,
+    only_person: Optional[str],
+) -> list[tuple[str, NextcloudNamedFace]]:
+    """Return ``(digiKam-relative path, face)`` pairs inside the configured folder."""
+    wanted_person = sanitize_person_name(only_person or "").strip()
+    skipped_people = {person.lower() for person in DEFAULT_SKIP_PERSONS}
+    selected: list[tuple[str, NextcloudNamedFace]] = []
+    for named_face in faces:
+        person = sanitize_person_name(named_face.face.person).strip()
+        if not person or person.lower() in skipped_people:
+            continue
+        if wanted_person and not person_names_match(person, wanted_person):
+            continue
+        relative = _library_relative_path(
+            named_face.file.webdav_path or named_face.file.path,
+            nextcloud_photos_path,
+        )
+        if relative:
+            selected.append((relative, named_face))
+    return selected
+
+
+def compare_memories_to_digikam(
+    digikam: DigikamDB,
+    selected_faces: list[tuple[str, NextcloudNamedFace]],
+    report: SyncReport,
+    *,
+    iou_threshold: float = 0.4,
+    batch_size: int = 250,
+    max_actions: int = 5000,
+    max_conflicts: int = 5000,
+    max_unmatched: int = 500,
+    progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> SyncReport:
+    """Merge the preview of Memories-originating faces into ``report``.
+
+    This function is deliberately read-only. A named Memories face with no
+    overlapping digiKam rectangle becomes a proposed ``create_digikam`` action.
+    An overlapping rectangle with a different name becomes a conflict.
+    """
+    grouped: dict[str, list[NextcloudNamedFace]] = defaultdict(list)
+    for relative, named_face in selected_faces:
+        grouped[normalize_path(relative).strip("/")].append(named_face)
+
+    paths = sorted(grouped, key=str.casefold)
+    report.files_memories = len(paths)
+    report.faces_memories = sum(len(group) for group in grouped.values())
+    existing_conflicts = {
+        (conflict.nc_file_id, conflict.nc_detection_id)
+        for conflict in report.conflicts
+    }
+    done = 0
+    reverse_matched = 0
+
+    for start in range(0, len(paths), batch_size):
+        batch_paths = paths[start : start + batch_size]
+        resolved = digikam.images_for_relative_paths(batch_paths)
+        for relative in batch_paths:
+            key = normalize_path(relative).strip("/").lower()
+            image = resolved.get(key)
+            remote = grouped[relative]
+            if image is None:
+                report.files_unmatched_nextcloud += 1
+                if len(report.unmatched_nextcloud_paths) < max_unmatched:
+                    report.unmatched_nextcloud_paths.append(relative)
+                continue
+            reverse_matched += 1
+
+            remote_faces = [entry.face for entry in remote]
+            pairs, _only_digikam, only_memories = match_regions(
+                image.faces,
+                remote_faces,
+                iou_threshold,
+            )
+            for digikam_face, memories_face, iou in pairs:
+                if person_names_match(digikam_face.person, memories_face.person):
+                    continue
+                conflict_key = (
+                    int(memories_face.nc_file_id or remote[0].file.file_id),
+                    memories_face.nc_detection_id,
+                )
+                if conflict_key in existing_conflicts:
+                    continue
+                existing_conflicts.add(conflict_key)
+                if len(report.conflicts) < max_conflicts:
+                    report.conflicts.append(
+                        RegionConflict(
+                            path=relative,
+                            digikam_person=digikam_face.person,
+                            digikam_rect=digikam_face.rect.as_tuple(),
+                            nextcloud_person=memories_face.person,
+                            nextcloud_rect=memories_face.rect.as_tuple(),
+                            iou=iou,
+                            nc_detection_id=memories_face.nc_detection_id,
+                            nc_file_id=conflict_key[0],
+                            digikam_image_id=image.image_id,
+                            digikam_tag_id=digikam_face.digikam_tag_id,
+                        )
+                    )
+
+            for memories_face in only_memories:
+                report.created_in_digikam += 1
+                if len(report.actions) < max_actions:
+                    report.actions.append(
+                        RegionAction(
+                            action="create_digikam",
+                            path=relative,
+                            person=memories_face.person,
+                            rect=memories_face.rect.as_tuple(),
+                            detail="create face in digiKam from Memories",
+                            nc_file_id=memories_face.nc_file_id,
+                            nc_detection_id=memories_face.nc_detection_id,
+                            nc_cluster_id=memories_face.nc_cluster_id,
+                        )
+                    )
+
+        done += len(batch_paths)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "phase": "scanning_memories",
+                    "current": done,
+                    "total": len(paths),
+                    "matched": report.files_matched + reverse_matched,
+                    "assigned": report.assigned,
+                    "inserted": report.inserted,
+                    "created_in_digikam": report.created_in_digikam,
+                    "skipped": report.skipped,
+                    "conflicts": report.conflict_count,
+                }
+            )
+    return report

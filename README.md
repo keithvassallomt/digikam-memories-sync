@@ -3,10 +3,10 @@
 This project reconciles face names and rectangles between a local digiKam
 library and Nextcloud Memories/Recognize.
 
-The first public release will support changes in both directions. The existing
-digiKam → Memories engine and the Nextcloud face-import endpoint are working;
-Memories → digiKam synchronization and the guided desktop UI are the remaining
-major slices.
+The first public release will support changes in both directions. The guided
+desktop UI now previews digiKam → Memories and Memories → digiKam changes. The
+conflict review, safe Apply flow and sync ledger remain before the first usable
+release.
 
 ## Repository layout
 
@@ -51,6 +51,6 @@ release will not be marked usable until synchronization works in both
 directions.
 
 The current interface implements first-run setup, All/One-person selection and
-the existing digiKam → Memories preview. Preview runs and notifications are
-persisted in the application state database. The reverse preview, conflict
-review and Apply flow will be connected as the two-way engine is completed.
+a read-only two-way preview. Preview runs and notifications are persisted in
+the application state database. The conflict review and Apply flow are still
+disabled.

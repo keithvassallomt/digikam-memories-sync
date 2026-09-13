@@ -1,5 +1,6 @@
 import json
 import unittest
+from urllib.parse import parse_qs, urlparse
 
 from digikam_nextcloud.models import NextcloudFile, Rect
 from digikam_nextcloud.nextcloud_http import (
@@ -15,6 +16,7 @@ class FaceImportHTTPTests(unittest.TestCase):
         backend = NextcloudHTTP.__new__(NextcloudHTTP)
         backend.timeout = 60.0
         backend.supports_insert = True
+        backend.supports_export = True
         return backend
 
     def test_capability_probe_enables_only_matching_api(self):
@@ -24,16 +26,81 @@ class FaceImportHTTPTests(unittest.TestCase):
             {},
             json.dumps(
                 {
-                    "apiVersion": 1,
+                    "apiVersion": 2,
                     "createFaceDetection": True,
+                    "listFaceDetections": True,
                 }
             ).encode(),
         )
 
-        self.assertTrue(backend._probe_face_import())
+        self.assertEqual(
+            backend._probe_face_sync_app(), {"create": True, "list": True}
+        )
 
         backend._request = lambda *args, **kwargs: (404, {}, b"")
-        self.assertFalse(backend._probe_face_import())
+        self.assertEqual(
+            backend._probe_face_sync_app(), {"create": False, "list": False}
+        )
+
+    def test_named_face_export_is_paginated_and_parsed(self):
+        backend = self.make_backend()
+        backend.face_list_url = lambda: "index.php/apps/digikam_face_sync/api/v1/faces"
+        pages = {
+            0: {
+                "detections": [
+                    {
+                        "id": 7,
+                        "fileId": 11,
+                        "path": "Photos/2026/one.jpg",
+                        "name": "one.jpg",
+                        "person": "Gail Vassallo",
+                        "x": 0.1,
+                        "y": 0.2,
+                        "width": 0.3,
+                        "height": 0.4,
+                        "clusterId": 4,
+                        "threshold": 0.8,
+                    }
+                ],
+                "nextAfter": 7,
+            },
+            7: {
+                "detections": [
+                    {
+                        "id": 9,
+                        "fileId": 12,
+                        "path": "Photos/2026/two.jpg",
+                        "name": "two.jpg",
+                        "person": "Gail Vassallo",
+                        "x": 0.2,
+                        "y": 0.2,
+                        "width": 0.2,
+                        "height": 0.2,
+                        "clusterId": 4,
+                    }
+                ],
+                "nextAfter": None,
+            },
+        }
+        requested = []
+
+        def request(method, path, **kwargs):
+            query = parse_qs(urlparse(path).query)
+            requested.append(query)
+            after = int(query["after"][0])
+            return 200, {}, json.dumps(pages[after]).encode()
+
+        backend._request = request
+        progress = []
+        faces = backend.list_named_faces(
+            "Gail Vassallo", page_size=1, progress_callback=progress.append
+        )
+
+        self.assertEqual([face.face.nc_detection_id for face in faces], [7, 9])
+        self.assertEqual(faces[0].file.webdav_path, "Photos/2026/one.jpg")
+        self.assertEqual(faces[0].face.person, "Gail Vassallo")
+        self.assertEqual(progress, [1, 2])
+        self.assertEqual(requested[0]["person"], ["Gail Vassallo"])
 
     def test_recognize_installation_probe_distinguishes_missing_and_bad_login(self):
         backend = self.make_backend()
@@ -64,6 +131,7 @@ class FaceImportHTTPTests(unittest.TestCase):
         backend = self.make_backend()
         backend.recognize_installed = True
         backend.supports_insert = False
+        backend.supports_export = False
 
         requirements = backend.connection_requirements()
 

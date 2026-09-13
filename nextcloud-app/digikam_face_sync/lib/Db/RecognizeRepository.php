@@ -58,6 +58,65 @@ final class RecognizeRepository {
 		return is_array($row) ? $row : null;
 	}
 
+	/** @return list<string> */
+	public function findPeople(string $userId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('title')
+			->from(self::CLUSTERS_TABLE)
+			->where($qb->expr()->eq('user_id', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)))
+			->orderBy('title', 'ASC');
+		$result = $qb->executeQuery();
+		$people = [];
+		while (($row = $result->fetch()) !== false) {
+			$title = trim((string)$row['title']);
+			if ($title !== '') {
+				$people[] = $title;
+			}
+		}
+		$result->closeCursor();
+		return $people;
+	}
+
+	/** @return list<array<string, mixed>> */
+	public function findNamedDetections(
+		string $userId,
+		?string $person,
+		int $afterId,
+		int $limit,
+	): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select(
+			'd.id',
+			'd.file_id',
+			'd.x',
+			'd.y',
+			'd.width',
+			'd.height',
+			'd.cluster_id',
+			'd.threshold',
+			'c.title',
+		)
+			->from(self::DETECTIONS_TABLE, 'd')
+			->innerJoin(
+				'd',
+				self::CLUSTERS_TABLE,
+				'c',
+				$qb->expr()->eq('d.cluster_id', 'c.id'),
+			)
+			->where($qb->expr()->eq('d.user_id', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)))
+			->andWhere($qb->expr()->eq('c.user_id', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)))
+			->andWhere($qb->expr()->gt('d.id', $qb->createNamedParameter($afterId, IQueryBuilder::PARAM_INT)))
+			->orderBy('d.id', 'ASC')
+			->setMaxResults($limit);
+		if ($person !== null) {
+			$qb->andWhere($qb->expr()->eq('c.title', $qb->createNamedParameter($person, IQueryBuilder::PARAM_STR)));
+		}
+		$result = $qb->executeQuery();
+		$rows = $result->fetchAll();
+		$result->closeCursor();
+		return $rows;
+	}
+
 	public function getOrCreateCluster(string $userId, string $title): int {
 		$existing = $this->findClusterByTitle($userId, $title);
 		if ($existing !== null) {

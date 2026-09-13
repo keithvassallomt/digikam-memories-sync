@@ -3,11 +3,13 @@
 This is a separate Nextcloud app. It lives beside Recognize in Nextcloud's app
 directory. Updating Recognize does not remove or overwrite it.
 
-The app adds this authenticated endpoint:
+The app adds these authenticated endpoints:
 
 ```text
 GET  /index.php/apps/digikam_face_sync/api/v1/face-import
 POST /index.php/apps/digikam_face_sync/api/v1/face-import
+GET  /index.php/apps/digikam_face_sync/api/v1/people
+GET  /index.php/apps/digikam_face_sync/api/v1/faces
 ```
 
 It currently supports Nextcloud 34 and Recognize 12.x. A Recognize 12.x update
@@ -15,7 +17,8 @@ needs no reinstall of this app. After a future Recognize major update, this app
 remains installed but pauses imports until its compatibility is checked and its
 version support is updated.
 
-The POST request verifies file access, rejects overlapping conflicting faces,
+The face-list endpoints return only the signed-in user's accessible files and
+use cursor pagination. The POST request verifies file access, rejects overlapping conflicting faces,
 generates a real descriptor with Recognize's locally installed model, and then
 writes the detection into Recognize's existing tables. Retrying an identical
 request returns the existing detection.

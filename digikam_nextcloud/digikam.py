@@ -263,6 +263,8 @@ class DigikamDB:
         image_ids: list[int],
         skip_persons: frozenset[str],
         only_persons: Optional[frozenset[str]] = None,
+        *,
+        require_faces: bool = True,
     ) -> list[DigikamImage]:
         if not image_ids:
             return []
@@ -365,7 +367,11 @@ class DigikamDB:
                 )
             )
 
-        result = [images[i] for i in image_ids if i in images and images[i].faces]
+        result = [
+            images[i]
+            for i in image_ids
+            if i in images and (images[i].faces or not require_faces)
+        ]
         LOG.debug(
             "  loaded %d images with named faces (%d tagRegion rows, %.2fs)",
             len(result),
@@ -373,6 +379,58 @@ class DigikamDB:
             time.monotonic() - t0,
         )
         return result
+
+    def images_for_relative_paths(
+        self,
+        relative_paths: list[str],
+        skip_persons: frozenset[str] = DEFAULT_SKIP_PERSONS,
+    ) -> dict[str, DigikamImage]:
+        """Resolve Nextcloud-relative photo paths to active digiKam images.
+
+        The basename filter keeps the query small, while the complete normalized
+        relative path prevents identically named photos in different albums from
+        being confused.
+        """
+        wanted = {
+            normalize_path(path).strip("/").lower()
+            for path in relative_paths
+            if normalize_path(path).strip("/")
+        }
+        if not wanted:
+            return {}
+
+        names = sorted({Path(path).name.lower() for path in wanted})
+        image_ids: set[int] = set()
+        cursor = self.conn.cursor()
+        for start in range(0, len(names), _IN_CHUNK):
+            chunk = names[start : start + _IN_CHUNK]
+            placeholders = ",".join("?" * len(chunk))
+            cursor.execute(
+                f"""SELECT id FROM Images
+                    WHERE status = 1 AND lower(name) IN ({placeholders})""",
+                chunk,
+            )
+            image_ids.update(int(row[0]) for row in cursor.fetchall())
+
+        images = self._load_images_by_ids(
+            sorted(image_ids),
+            skip_persons,
+            require_faces=False,
+        )
+        resolved: dict[str, DigikamImage] = {}
+        ambiguous: set[str] = set()
+        for image in images:
+            key = normalize_path(image.relative_path).strip("/").lower()
+            if key not in wanted:
+                continue
+            if key in resolved:
+                ambiguous.add(key)
+            else:
+                resolved[key] = image
+        for key in ambiguous:
+            resolved.pop(key, None)
+            LOG.warning("Multiple active digiKam images match relative path %r", key)
+        return resolved
 
     def iter_image_batches(
         self,

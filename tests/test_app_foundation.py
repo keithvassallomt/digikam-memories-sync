@@ -31,6 +31,15 @@ class FakeBackend:
     def connection_requirements(self):
         return self.requirements
 
+    def list_named_people(self):
+        return ["Gail Vassallo", "April Vassallo"]
+
+    def list_named_faces(self, person=None, **kwargs):
+        callback = kwargs.get("progress_callback")
+        if callback:
+            callback(0)
+        return []
+
     def close(self):
         self.closed = True
 
@@ -47,6 +56,15 @@ class FakeDigikam:
 
     def person_tag_ids(self):
         return {1: "Gail Vassallo", 2: "Keith Vassallo"}
+
+    def image_ids_for_person(self, person):
+        return list(range(10))
+
+    def count_images_with_faces(self):
+        return 10
+
+    def images_for_relative_paths(self, paths):
+        return {}
 
 
 class AppFoundationTests(unittest.TestCase):
@@ -189,7 +207,7 @@ class AppFoundationTests(unittest.TestCase):
         try:
             result = service.preview({"scope": "person", "person": "Gail Vassallo"})
             self.assertEqual(result["summary"]["conflicts"], 1)
-            self.assertEqual(result["direction"], "digikam_to_memories")
+            self.assertEqual(result["direction"], "two_way")
             self.assertEqual(captured["only_person"], "Gail Vassallo")
             self.assertFalse(captured["apply"])
             self.assertEqual(state.run(result["run_id"])["status"], "previewed")

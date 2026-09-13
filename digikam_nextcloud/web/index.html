@@ -46,8 +46,8 @@
 
           <div id="message" class="message" aria-live="polite"></div>
           <section id="install-card" class="card requirement" hidden>
-            <h2>Face Sync must be installed in Nextcloud</h2>
-            <p>Recognize is working, but the companion Face Sync app is missing.</p>
+            <h2>Face Sync must be installed or updated in Nextcloud</h2>
+            <p>Recognize is working, but the companion Face Sync app is missing a required feature.</p>
             <a id="install-link" class="button secondary" href="https://keithvassallo.com" target="_blank" rel="noopener">Open installation page</a>
             <button id="check-again" class="secondary" type="button">Check again</button>
           </section>
@@ -57,7 +57,7 @@
 
       <section id="scope-screen" class="screen">
         <h1>Whose faces should be checked?</h1>
-        <p class="lead">Your connection is saved. The preview step will be connected to the two-way engine next.</p>
+        <p class="lead">Compare named faces in both libraries before deciding what to change.</p>
         <div class="scope-options">
           <label class="scope-option"><input type="radio" name="scope" value="all"><strong>All faces</strong><span>Compare every named face in both libraries.</span></label>
           <label class="scope-option"><input type="radio" name="scope" value="person" checked><strong>One person</strong><span>Choose one person for a quicker run.</span></label>
@@ -79,17 +79,17 @@
             <span><strong id="live-conflicts">0</strong> conflicts</span>
           </div>
         </section>
-        <p class="notice">Progress uses the actual number of selected digiKam photos. It advances only when a batch has finished comparing with Nextcloud.</p>
+        <p class="notice">Progress uses the actual number of photo comparisons in both libraries. It advances only after a batch has been checked.</p>
       </section>
 
       <section id="preview-screen" class="screen">
         <h1 id="preview-heading">Preview</h1>
         <p class="lead">No changes were made. Review the result before anything is applied.</p>
-        <div class="notice">This development preview currently shows digiKam → Memories changes. The reverse direction will be added before release.</div>
+        <div class="notice">This preview checks both directions. Nothing has been changed.</div>
         <div class="stats">
           <div class="stat"><strong id="stat-correct">0</strong><span>Already correct</span></div>
-          <div class="stat"><strong id="stat-assign">0</strong><span>Name existing faces</span></div>
-          <div class="stat"><strong id="stat-create">0</strong><span>Create face boxes</span></div>
+          <div class="stat"><strong id="stat-memories">0</strong><span>Changes for Memories</span></div>
+          <div class="stat"><strong id="stat-digikam">0</strong><span>Additions for digiKam</span></div>
           <div class="stat"><strong id="stat-conflicts">0</strong><span>Need your decision</span></div>
         </div>
         <section class="card">
@@ -98,6 +98,11 @@
             <li><span>Photos checked in digiKam</span><strong id="result-files">0</strong></li>
             <li><span>Photos matched to Nextcloud</span><strong id="result-matched">0</strong></li>
             <li><span>Photos not found in Nextcloud</span><strong id="result-unmatched">0</strong></li>
+            <li><span>Memories photos checked</span><strong id="result-memories-files">0</strong></li>
+            <li><span>Memories photos not found in digiKam</span><strong id="result-unmatched-digikam">0</strong></li>
+            <li><span>Name existing faces in Memories</span><strong id="result-assign">0</strong></li>
+            <li><span>Create face boxes in Memories</span><strong id="result-create-memories">0</strong></li>
+            <li><span>Create face boxes in digiKam</span><strong id="result-create-digikam">0</strong></li>
             <li><span>Warnings</span><strong id="result-warnings">0</strong></li>
           </ul>
         </section>

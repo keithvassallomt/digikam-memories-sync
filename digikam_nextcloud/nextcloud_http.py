@@ -11,7 +11,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 from urllib.parse import quote, unquote
 
 from .constants import DAV_NS, IMAGE_EXT
@@ -22,6 +22,7 @@ from .models import (
     FaceRegion,
     FileMatch,
     NextcloudFile,
+    NextcloudNamedFace,
     NextcloudRequirements,
     Rect,
 )
@@ -146,6 +147,7 @@ class NextcloudHTTP:
     """
 
     supports_insert = False
+    supports_export = False
     generates_face_vectors = False
 
     def __init__(
@@ -206,7 +208,9 @@ class NextcloudHTTP:
             except Exception as e:
                 LOG.debug("Could not auto-fetch Recognize API key: %s", e)
 
-        self.supports_insert = self._probe_face_import()
+        capabilities = self._probe_face_sync_app()
+        self.supports_insert = capabilities["create"]
+        self.supports_export = capabilities["list"]
         self.generates_face_vectors = self.supports_insert
 
     def _probe_recognize_installation(self) -> bool:
@@ -237,15 +241,15 @@ class NextcloudHTTP:
         """Return the install state needed by the first-run connection UI."""
         return NextcloudRequirements(
             recognize_installed=self.recognize_installed,
-            face_sync_installed=self.supports_insert,
+            face_sync_installed=self.supports_insert and self.supports_export,
             face_sync_install_url=FACE_SYNC_APP_INSTALL_URL,
         )
 
     def face_import_url(self) -> str:
         return "index.php/apps/digikam_face_sync/api/v1/face-import"
 
-    def _probe_face_import(self) -> bool:
-        """Detect the optional authenticated face-import API."""
+    def _probe_face_sync_app(self) -> dict[str, bool]:
+        """Detect the authenticated companion app capabilities."""
         try:
             status, _, raw = self._request(
                 "GET",
@@ -257,18 +261,133 @@ class NextcloudHTTP:
             )
             if status != 200:
                 LOG.debug("Recognize face-import API unavailable (HTTP %s)", status)
-                return False
+                return {"create": False, "list": False}
             payload = json.loads(raw.decode("utf-8"))
-            available = bool(
-                payload.get("apiVersion") == 1
-                and payload.get("createFaceDetection") is True
-            )
-            if available:
+            capabilities = {
+                "create": payload.get("createFaceDetection") is True,
+                "list": payload.get("listFaceDetections") is True,
+            }
+            if capabilities["create"]:
                 LOG.info("Recognize face-import API available")
-            return available
+            if capabilities["list"]:
+                LOG.info("Recognize face-list API available")
+            return capabilities
         except Exception as e:
-            LOG.debug("Could not probe Recognize face-import API: %s", e)
-            return False
+            LOG.debug("Could not probe Face Sync companion API: %s", e)
+            return {"create": False, "list": False}
+
+    def face_list_url(self) -> str:
+        return "index.php/apps/digikam_face_sync/api/v1/faces"
+
+    def people_list_url(self) -> str:
+        return "index.php/apps/digikam_face_sync/api/v1/people"
+
+    def list_named_people(self) -> list[str]:
+        if not self.supports_export:
+            raise NextcloudConnectionError(
+                "The Nextcloud Face Sync companion app must be updated before "
+                "Memories faces can be read."
+            )
+        status, _, raw = self._request(
+            "GET",
+            self.people_list_url(),
+            headers={"Accept": "application/json", "OCS-APIRequest": "true"},
+        )
+        if status != 200:
+            raise NextcloudConnectionError(
+                f"Could not list Memories people (HTTP {status})."
+            )
+        payload = json.loads(raw.decode("utf-8"))
+        people = payload.get("people")
+        if not isinstance(people, list):
+            raise NextcloudConnectionError("The Memories people response was invalid.")
+        return [
+            sanitize_person_name(str(person))
+            for person in people
+            if str(person).strip()
+        ]
+
+    def list_named_faces(
+        self,
+        person: Optional[str] = None,
+        *,
+        page_size: int = 1000,
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> list[NextcloudNamedFace]:
+        """Read every named Recognize detection through the companion app."""
+        if not self.supports_export:
+            raise NextcloudConnectionError(
+                "The Nextcloud Face Sync companion app must be updated before "
+                "Memories faces can be read."
+            )
+        cleaned = sanitize_person_name(person or "").strip()
+        after = 0
+        out: list[NextcloudNamedFace] = []
+        while True:
+            query: dict[str, str | int] = {
+                "after": after,
+                "limit": max(1, min(1000, int(page_size))),
+            }
+            if cleaned:
+                query["person"] = cleaned
+            path = f"{self.face_list_url()}?{urllib.parse.urlencode(query)}"
+            status, _, raw = self._request(
+                "GET",
+                path,
+                headers={"Accept": "application/json", "OCS-APIRequest": "true"},
+            )
+            if status != 200:
+                raise NextcloudConnectionError(
+                    f"Could not list Memories faces (HTTP {status})."
+                )
+            payload = json.loads(raw.decode("utf-8"))
+            records = payload.get("detections")
+            if not isinstance(records, list):
+                raise NextcloudConnectionError("The Memories face response was invalid.")
+            for item in records:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    nc_file = NextcloudFile(
+                        file_id=int(item["fileId"]),
+                        path=normalize_path(str(item["path"])),
+                        name=str(item["name"]),
+                        size=0,
+                        webdav_path=normalize_path(str(item["path"])),
+                    )
+                    face = FaceRegion(
+                        person=sanitize_person_name(str(item["person"])),
+                        rect=Rect(
+                            float(item["x"]),
+                            float(item["y"]),
+                            float(item["width"]),
+                            float(item["height"]),
+                        ).clamp(),
+                        source="nextcloud",
+                        nc_file_id=nc_file.file_id,
+                        nc_detection_id=int(item["id"]),
+                        nc_cluster_id=int(item["clusterId"]),
+                        file_name=nc_file.name,
+                        threshold=float(item.get("threshold") or 0.0),
+                    )
+                except (KeyError, TypeError, ValueError) as error:
+                    raise NextcloudConnectionError(
+                        "The Memories face response contained an invalid detection."
+                    ) from error
+                if face.person and face.rect.area() > 0:
+                    out.append(NextcloudNamedFace(nc_file, face))
+            if progress_callback is not None:
+                progress_callback(len(out))
+            next_after = payload.get("nextAfter")
+            if next_after is None:
+                break
+            next_value = int(next_after)
+            if next_value <= after:
+                raise NextcloudConnectionError(
+                    "The Memories face response repeated its pagination cursor."
+                )
+            after = next_value
+        return out
 
     def close(self) -> None:
         self._client.close()

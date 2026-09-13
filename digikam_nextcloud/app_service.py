@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from .digikam import DigikamDB
 from .nextcloud_http import NextcloudHTTP
+from .reverse import compare_memories_to_digikam, selected_memories_faces
 from .settings import SettingsStore
 from .state_store import StateStore
 from .sync import sync
@@ -124,8 +125,20 @@ class AppService:
         database = settings.get("digikam_db")
         if not database:
             return []
-        with self.digikam_factory(database) as digikam:
-            return sorted(set(digikam.person_tag_ids().values()), key=str.casefold)
+        user_id = str(settings["nc_user"])
+        password = self.settings.password(user_id)
+        if not password:
+            raise ValueError("The saved Nextcloud app password is unavailable.")
+        backend = self.backend_factory(
+            str(settings["nextcloud_url"]), user_id, password, http_workers=4
+        )
+        try:
+            with self.digikam_factory(database) as digikam:
+                digikam_people = set(digikam.person_tag_ids().values())
+            memories_people = set(backend.list_named_people())
+        finally:
+            backend.close()
+        return sorted(digikam_people | memories_people, key=str.casefold)
 
     @staticmethod
     def _preview_selection(payload: dict[str, Any]) -> tuple[str, str]:
@@ -189,6 +202,43 @@ class AppService:
                 str(settings["nextcloud_url"]), user_id, password, http_workers=16
             )
             with self.digikam_factory(str(settings["digikam_db"])) as digikam:
+                self.state.update_progress(run_id, "loading_memories", 0, 0)
+                named_faces = backend.list_named_faces(
+                    person or None,
+                    progress_callback=lambda current: self.state.update_progress(
+                        run_id,
+                        "loading_memories",
+                        current,
+                        0,
+                        {"loaded_faces": current},
+                    ),
+                )
+                selected_faces = selected_memories_faces(
+                    named_faces,
+                    nextcloud_photos_path=str(settings.get("nc_photos_path", "Photos")),
+                    only_person=person or None,
+                )
+                memories_files = len({relative.lower() for relative, _ in selected_faces})
+                if person:
+                    digikam_files = len(digikam.image_ids_for_person(person))
+                else:
+                    digikam_files = digikam.count_images_with_faces()
+                total_work = digikam_files + memories_files
+
+                def forward_progress(progress: dict[str, Any]) -> None:
+                    detail = dict(progress)
+                    detail["phase"] = "scanning_digikam"
+                    detail["current"] = int(progress["current"])
+                    detail["total"] = total_work
+                    detail["created_in_digikam"] = 0
+                    self.state.update_progress(
+                        run_id,
+                        "scanning_digikam",
+                        int(progress["current"]),
+                        total_work,
+                        detail,
+                    )
+
                 report = self.sync_function(
                     digikam,
                     backend,
@@ -205,12 +255,25 @@ class AppService:
                     batch_size=250,
                     max_actions=5000,
                     session=None,
+                    progress_callback=forward_progress,
+                )
+                compare_memories_to_digikam(
+                    digikam,
+                    selected_faces,
+                    report,
+                    batch_size=250,
+                    max_actions=5000,
                     progress_callback=lambda progress: self.state.update_progress(
                         run_id,
-                        str(progress["phase"]),
-                        int(progress["current"]),
-                        int(progress["total"]),
-                        progress,
+                        "scanning_memories",
+                        digikam_files + int(progress["current"]),
+                        total_work,
+                        {
+                            **progress,
+                            "phase": "scanning_memories",
+                            "current": digikam_files + int(progress["current"]),
+                            "total": total_work,
+                        },
                     ),
                 )
             data = report.to_dict()
@@ -219,12 +282,14 @@ class AppService:
                 "run_id": run_id,
                 "scope": scope,
                 "person": person or None,
-                "direction": "digikam_to_memories",
+                "direction": "two_way",
                 **data,
             }
             self.state.save_result(run_id, result)
             self.state.finish_run(run_id, "previewed", summary)
-            self.state.update_progress(run_id, "completed", summary["files_digikam"], summary["files_digikam"], summary)
+            self.state.update_progress(
+                run_id, "completed", total_work, total_work, summary
+            )
             self.state.save_conflicts(run_id, data["conflicts"])
             if summary["conflicts"]:
                 self.state.create_notification(
@@ -235,7 +300,11 @@ class AppService:
                     run_id=run_id,
                 )
             else:
-                changes = summary["assigned"] + summary["inserted"]
+                changes = (
+                    summary["assigned"]
+                    + summary["inserted"]
+                    + summary["created_in_digikam"]
+                )
                 self.state.create_notification(
                     "run.completed" if changes else "run.no_changes",
                     "Preview complete",

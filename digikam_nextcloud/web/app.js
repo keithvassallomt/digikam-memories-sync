@@ -124,12 +124,17 @@ function showPreview(result) {
   const summary = result.summary;
   document.getElementById('preview-heading').textContent = result.person ? `Preview for ${result.person}` : 'Preview for all faces';
   document.getElementById('stat-correct').textContent = summary.skipped.toLocaleString();
-  document.getElementById('stat-assign').textContent = summary.assigned.toLocaleString();
-  document.getElementById('stat-create').textContent = summary.inserted.toLocaleString();
+  document.getElementById('stat-memories').textContent = (summary.assigned + summary.inserted).toLocaleString();
+  document.getElementById('stat-digikam').textContent = summary.created_in_digikam.toLocaleString();
   document.getElementById('stat-conflicts').textContent = summary.conflicts.toLocaleString();
   document.getElementById('result-files').textContent = summary.files_digikam.toLocaleString();
   document.getElementById('result-matched').textContent = summary.files_matched.toLocaleString();
   document.getElementById('result-unmatched').textContent = summary.files_unmatched_digikam.toLocaleString();
+  document.getElementById('result-memories-files').textContent = summary.files_memories.toLocaleString();
+  document.getElementById('result-unmatched-digikam').textContent = summary.files_unmatched_nextcloud.toLocaleString();
+  document.getElementById('result-assign').textContent = summary.assigned.toLocaleString();
+  document.getElementById('result-create-memories').textContent = summary.inserted.toLocaleString();
+  document.getElementById('result-create-digikam').textContent = summary.created_in_digikam.toLocaleString();
   document.getElementById('result-warnings').textContent = result.warnings.length.toLocaleString();
   document.getElementById('scope-screen').classList.remove('active');
   document.getElementById('scan-screen').classList.remove('active');
@@ -151,6 +156,9 @@ function showScan() {
   document.getElementById('scan-phase').textContent = 'Counting the selected digiKam photos…';
   document.getElementById('progress-percent').textContent = 'Preparing…';
   document.getElementById('progress-count').textContent = 'Counting photos';
+  document.getElementById('live-matched').textContent = '0';
+  document.getElementById('live-changes').textContent = '0';
+  document.getElementById('live-conflicts').textContent = '0';
 }
 
 function updateProgress(status) {
@@ -161,11 +169,19 @@ function updateProgress(status) {
     progress.value = Math.min(data.current, data.total);
     const percent = Math.floor((100 * data.current) / data.total);
     document.getElementById('progress-percent').textContent = `${percent}%`;
-    document.getElementById('progress-count').textContent = `${data.current.toLocaleString()} of ${data.total.toLocaleString()} photos`;
-    document.getElementById('scan-phase').textContent = 'Comparing face rectangles and names with Nextcloud…';
+    document.getElementById('progress-count').textContent = `${data.current.toLocaleString()} of ${data.total.toLocaleString()} comparisons`;
+    document.getElementById('scan-phase').textContent = data.phase === 'scanning_memories'
+      ? 'Checking faces from Memories against digiKam…'
+      : 'Checking faces from digiKam against Memories…';
+  } else if (data.phase === 'loading_memories') {
+    progress.removeAttribute('value');
+    progress.removeAttribute('max');
+    document.getElementById('progress-percent').textContent = 'Loading…';
+    document.getElementById('progress-count').textContent = `${(data.loaded_faces || 0).toLocaleString()} Memories faces loaded`;
+    document.getElementById('scan-phase').textContent = 'Loading named faces from Memories…';
   }
   document.getElementById('live-matched').textContent = (data.matched || 0).toLocaleString();
-  document.getElementById('live-changes').textContent = ((data.assigned || 0) + (data.inserted || 0)).toLocaleString();
+  document.getElementById('live-changes').textContent = ((data.assigned || 0) + (data.inserted || 0) + (data.created_in_digikam || 0)).toLocaleString();
   document.getElementById('live-conflicts').textContent = (data.conflicts || 0).toLocaleString();
 }
 

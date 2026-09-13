@@ -3,12 +3,13 @@
 	  xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
 	<id>digikam_face_sync</id>
 	<name>digiKam Face Sync</name>
-	<summary>Imports verified digiKam face rectangles into Recognize</summary>
+	<summary>Connects digiKam face rectangles with Recognize</summary>
 	<description><![CDATA[
-Adds an authenticated API for importing face rectangles from digiKam. Face
-descriptors are generated locally with the model installed by Recognize.
+Adds authenticated APIs for importing digiKam face rectangles and reading
+named Recognize faces. Face descriptors are generated locally with the model
+installed by Recognize.
 	]]></description>
-	<version>0.1.2</version>
+	<version>0.2.0</version>
 	<licence>agpl</licence>
 	<author mail="keith@vassallo.cloud">Keith Vassallo</author>
 	<namespace>DigikamFaceSync</namespace>
