@@ -115,3 +115,20 @@ class StateStore:
                 (status, json.dumps(summary), run_id),
             )
             self.conn.commit()
+
+    def save_conflicts(self, run_id: int, conflicts: list[dict[str, Any]]) -> None:
+        with self.lock:
+            self.conn.executemany(
+                "INSERT INTO conflicts(run_id, detail_json) VALUES (?, ?)",
+                [(run_id, json.dumps(conflict)) for conflict in conflicts],
+            )
+            self.conn.commit()
+
+    def run(self, run_id: int) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["summary"] = json.loads(result.pop("summary_json"))
+        return result

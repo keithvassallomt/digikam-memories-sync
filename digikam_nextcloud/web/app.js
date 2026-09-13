@@ -2,6 +2,7 @@ const token = document.querySelector('meta[name="face-sync-token"]').content;
 const form = document.getElementById('setup-form');
 const message = document.getElementById('message');
 const installCard = document.getElementById('install-card');
+const steps = document.querySelectorAll('.step');
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -81,11 +82,12 @@ form.addEventListener('submit', async (event) => {
     }
     document.getElementById('connect-screen').classList.remove('active');
     document.getElementById('scope-screen').classList.add('active');
-    document.querySelectorAll('.step')[0].classList.add('done');
-    document.querySelectorAll('.step')[0].classList.remove('current');
-    document.querySelectorAll('.step')[1].classList.add('current');
+    steps[0].classList.add('done');
+    steps[0].classList.remove('current');
+    steps[1].classList.add('current');
     document.querySelector('.connection').classList.add('ready');
     document.getElementById('connection-label').textContent = `Connected as ${result.settings.nc_user}`;
+    await loadPeople();
   } catch (error) {
     showMessage(error.message, 'error');
   } finally {
@@ -96,8 +98,72 @@ form.addEventListener('submit', async (event) => {
 document.getElementById('back-button').addEventListener('click', () => {
   document.getElementById('scope-screen').classList.remove('active');
   document.getElementById('connect-screen').classList.add('active');
-  document.querySelectorAll('.step')[1].classList.remove('current');
-  document.querySelectorAll('.step')[0].classList.add('current');
+  steps[1].classList.remove('current');
+  steps[0].classList.add('current');
+});
+
+document.querySelectorAll('input[name="scope"]').forEach((radio) => radio.addEventListener('change', () => {
+  document.getElementById('person-field').hidden = radio.value === 'all' && radio.checked;
+}));
+
+async function loadPeople() {
+  const result = await api('/api/people');
+  const select = document.getElementById('person-select');
+  select.replaceChildren();
+  result.people.forEach((person) => {
+    const option = document.createElement('option');
+    option.value = person;
+    option.textContent = person;
+    select.appendChild(option);
+  });
+  const gail = [...select.options].find((option) => option.value === 'Gail Vassallo');
+  if (gail) select.value = gail.value;
+}
+
+function showPreview(result) {
+  const summary = result.summary;
+  document.getElementById('preview-heading').textContent = result.person ? `Preview for ${result.person}` : 'Preview for all faces';
+  document.getElementById('stat-correct').textContent = summary.skipped.toLocaleString();
+  document.getElementById('stat-assign').textContent = summary.assigned.toLocaleString();
+  document.getElementById('stat-create').textContent = summary.inserted.toLocaleString();
+  document.getElementById('stat-conflicts').textContent = summary.conflicts.toLocaleString();
+  document.getElementById('result-files').textContent = summary.files_digikam.toLocaleString();
+  document.getElementById('result-matched').textContent = summary.files_matched.toLocaleString();
+  document.getElementById('result-unmatched').textContent = summary.files_unmatched_digikam.toLocaleString();
+  document.getElementById('result-warnings').textContent = result.warnings.length.toLocaleString();
+  document.getElementById('scope-screen').classList.remove('active');
+  document.getElementById('preview-screen').classList.add('active');
+  steps[1].classList.add('done');
+  steps[1].classList.remove('current');
+  steps[2].classList.add('current');
+}
+
+document.getElementById('preview-button').addEventListener('click', async (event) => {
+  const scope = document.querySelector('input[name="scope"]:checked').value;
+  const person = document.getElementById('person-select').value;
+  const scopeMessage = document.getElementById('scope-message');
+  event.currentTarget.disabled = true;
+  event.currentTarget.textContent = 'Checking faces…';
+  scopeMessage.textContent = 'This can take a few minutes. You can leave this page open.';
+  scopeMessage.className = 'message success';
+  try {
+    const result = await api('/api/preview', { method: 'POST', body: JSON.stringify({ scope, person }) });
+    showPreview(result);
+  } catch (error) {
+    scopeMessage.textContent = error.message;
+    scopeMessage.className = 'message error';
+  } finally {
+    event.currentTarget.disabled = false;
+    event.currentTarget.textContent = 'Preview changes';
+  }
+});
+
+document.getElementById('preview-back-button').addEventListener('click', () => {
+  document.getElementById('preview-screen').classList.remove('active');
+  document.getElementById('scope-screen').classList.add('active');
+  steps[2].classList.remove('current');
+  steps[1].classList.remove('done');
+  steps[1].classList.add('current');
 });
 
 async function loadSettings() {
@@ -108,6 +174,10 @@ async function loadSettings() {
   });
   if (settings.has_password) document.getElementById('password-help').textContent = 'Saved app password will be used if this is left blank.';
   if (!settings.digikam_library) document.getElementById('discover-button').click();
+  else {
+    document.querySelector('.connection').classList.add('ready');
+    document.getElementById('connection-label').textContent = `Connected as ${settings.nc_user}`;
+  }
 }
 
 loadSettings().catch((error) => showMessage(error.message, 'error'));

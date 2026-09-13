@@ -50,7 +50,7 @@ Command-line runs are previews unless `--apply` is supplied. The desktop
 release will not be marked usable until synchronization works in both
 directions.
 
-The current interface implements first-run setup: digiKam database discovery,
-saved settings and credentials, and the Recognize/Face Sync connection checks.
-The scope, preview, conflict and apply screens will be connected as the
-two-way engine is completed.
+The current interface implements first-run setup, All/One-person selection and
+the existing digiKam → Memories preview. Preview runs and notifications are
+persisted in the application state database. The reverse preview, conflict
+review and Apply flow will be connected as the two-way engine is completed.

@@ -5,19 +5,22 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 
 from digikam_nextcloud.app_service import AppService, resolve_digikam_database
 from digikam_nextcloud.local_server import FaceSyncHTTPServer
 from digikam_nextcloud.models import NextcloudRequirements
+from digikam_nextcloud.models import RegionConflict, SyncReport
 from digikam_nextcloud.settings import SettingsStore
 from digikam_nextcloud.state_store import StateStore
 
 
 def make_digikam_database(path: Path) -> None:
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         for table in ("Images", "Tags", "TagProperties", "ImageTagProperties"):
             connection.execute(f"CREATE TABLE {table} (id INTEGER)")
+        connection.commit()
 
 
 class FakeBackend:
@@ -30,6 +33,20 @@ class FakeBackend:
 
     def close(self):
         self.closed = True
+
+
+class FakeDigikam:
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def person_tag_ids(self):
+        return {1: "Gail Vassallo", 2: "Keith Vassallo"}
 
 
 class AppFoundationTests(unittest.TestCase):
@@ -119,6 +136,69 @@ class AppFoundationTests(unittest.TestCase):
             server.shutdown()
             thread.join(timeout=2)
             server.server_close()
+            state.close()
+
+    def test_preview_records_run_conflicts_and_notification(self):
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        settings.save(
+            {
+                "digikam_library": str(self.library),
+                "digikam_db": str(self.library / "digikam4.db"),
+                "nextcloud_url": "https://cloud.test",
+                "nc_user": "keith",
+                "nc_photos_path": "Photos",
+            },
+            "secret",
+        )
+        state = StateStore(self.root / "state.sqlite3")
+        backend = FakeBackend(NextcloudRequirements(True, True, "https://install.test"))
+        report = SyncReport(
+            files_digikam=10,
+            files_matched=10,
+            faces_digikam=12,
+            faces_nextcloud=11,
+            assigned=2,
+            inserted=3,
+            skipped=6,
+            conflicts=[
+                RegionConflict(
+                    path="2026/photo.jpg",
+                    digikam_person="Gail Vassallo",
+                    digikam_rect=(0.1, 0.2, 0.3, 0.4),
+                    nextcloud_person="Angie Galea",
+                    nextcloud_rect=(0.1, 0.2, 0.3, 0.4),
+                    iou=1.0,
+                    nc_detection_id=9,
+                    nc_file_id=7,
+                )
+            ],
+        )
+        captured = {}
+
+        def fake_sync(*args, **kwargs):
+            captured.update(kwargs)
+            return report
+
+        service = AppService(
+            settings,
+            state,
+            backend_factory=lambda *a, **k: backend,
+            digikam_factory=FakeDigikam,
+            sync_function=fake_sync,
+        )
+        try:
+            result = service.preview({"scope": "person", "person": "Gail Vassallo"})
+            self.assertEqual(result["summary"]["conflicts"], 1)
+            self.assertEqual(result["direction"], "digikam_to_memories")
+            self.assertEqual(captured["only_person"], "Gail Vassallo")
+            self.assertFalse(captured["apply"])
+            self.assertEqual(state.run(result["run_id"])["status"], "previewed")
+            self.assertEqual(
+                state.unread_notifications()[0]["event_type"], "conflicts.created"
+            )
+            conflict_count = state.conn.execute("SELECT COUNT(*) FROM conflicts").fetchone()[0]
+            self.assertEqual(conflict_count, 1)
+        finally:
             state.close()
 
 

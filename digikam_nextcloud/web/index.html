@@ -62,7 +62,31 @@
           <label class="scope-option"><input type="radio" name="scope" value="all"><strong>All faces</strong><span>Compare every named face in both libraries.</span></label>
           <label class="scope-option"><input type="radio" name="scope" value="person" checked><strong>One person</strong><span>Choose one person for a quicker run.</span></label>
         </div>
-        <div class="actions"><button id="back-button" class="secondary" type="button">Back to settings</button><button class="primary" type="button" disabled>Preview changes</button></div>
+        <label id="person-field" class="person-field">Person<select id="person-select"><option value="">Loading people…</option></select></label>
+        <div id="scope-message" class="message" aria-live="polite"></div>
+        <div class="actions"><button id="back-button" class="secondary" type="button">Back to settings</button><button id="preview-button" class="primary" type="button">Preview changes</button></div>
+      </section>
+
+      <section id="preview-screen" class="screen">
+        <h1 id="preview-heading">Preview</h1>
+        <p class="lead">No changes were made. Review the result before anything is applied.</p>
+        <div class="notice">This development preview currently shows digiKam → Memories changes. The reverse direction will be added before release.</div>
+        <div class="stats">
+          <div class="stat"><strong id="stat-correct">0</strong><span>Already correct</span></div>
+          <div class="stat"><strong id="stat-assign">0</strong><span>Name existing faces</span></div>
+          <div class="stat"><strong id="stat-create">0</strong><span>Create face boxes</span></div>
+          <div class="stat"><strong id="stat-conflicts">0</strong><span>Need your decision</span></div>
+        </div>
+        <section class="card">
+          <h2>What the preview found</h2>
+          <ul class="results">
+            <li><span>Photos checked in digiKam</span><strong id="result-files">0</strong></li>
+            <li><span>Photos matched to Nextcloud</span><strong id="result-matched">0</strong></li>
+            <li><span>Photos not found in Nextcloud</span><strong id="result-unmatched">0</strong></li>
+            <li><span>Warnings</span><strong id="result-warnings">0</strong></li>
+          </ul>
+        </section>
+        <div class="actions"><button id="preview-back-button" class="secondary" type="button">Back</button><button class="primary" type="button" disabled>Apply changes</button></div>
       </section>
     </main>
   </div>

@@ -47,6 +47,8 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, self.server.app.public_settings())
         elif path == "/api/digikam/discover":
             self._json(HTTPStatus.OK, {"databases": discover_digikam_databases()})
+        elif path == "/api/people":
+            self._json(HTTPStatus.OK, {"people": self.server.app.people()})
         elif path == "/api/notifications":
             self._json(
                 HTTPStatus.OK,
@@ -70,6 +72,8 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.server.app.test_connection(payload))
             elif path == "/api/settings":
                 self._json(HTTPStatus.OK, self.server.app.save_settings(payload))
+            elif path == "/api/preview":
+                self._json(HTTPStatus.OK, self.server.app.preview(payload))
             else:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
         except RecognizeNotInstalledError as error:
@@ -81,6 +85,11 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.BAD_REQUEST, {"code": "invalid_setup", "error": str(error)})
         except json.JSONDecodeError:
             self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid request."})
+        except Exception:
+            self._json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"error": "The operation failed. Check the Face Sync terminal for details."},
+            )
 
     def _authorized(self) -> bool:
         return self.headers.get("X-Face-Sync-Token", "") == self.server.api_token
