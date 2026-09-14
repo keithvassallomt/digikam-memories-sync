@@ -193,6 +193,51 @@
           </section>
           <div class="actions"><button id="new-sync-button" class="secondary" type="button">Start another sync</button><button id="retry-apply-button" class="primary" type="button" hidden>Review and retry</button></div>
         </div>
+
+        <div id="failure-review" hidden>
+          <div id="failure-review-item">
+            <div class="conflict-heading">
+              <div><h1>Face needs a decision</h1><p id="failure-lead" class="lead"></p></div>
+              <strong id="failure-position" class="conflict-position"></strong>
+            </div>
+            <div class="conflict-grid">
+              <div>
+                <div id="failure-photo-frame" class="conflict-photo-frame editable-photo-frame">
+                  <span id="failure-photo-loading" class="photo-message">Loading photo…</span>
+                  <img id="failure-photo" alt="" hidden>
+                  <canvas id="failure-crop" width="960" height="720" role="img" aria-label="Face needing a decision" hidden></canvas>
+                  <div id="failure-face-box" class="face-box digikam-box editable-face-box" hidden>
+                    <small id="failure-box-label"></small>
+                    <i class="resize-handle top-left" data-corner="top-left"></i>
+                    <i class="resize-handle top-right" data-corner="top-right"></i>
+                    <i class="resize-handle bottom-left" data-corner="bottom-left"></i>
+                    <i class="resize-handle bottom-right" data-corner="bottom-right"></i>
+                  </div>
+                </div>
+                <p id="failure-path" class="photo-caption"></p>
+                <p class="photo-caption">Drag the box or its corners if the face area is wrong.</p>
+              </div>
+              <div>
+                <section class="card failure-detail-card">
+                  <h2 id="failure-person"></h2>
+                  <p id="failure-location"></p>
+                  <p id="failure-reason"></p>
+                </section>
+                <button id="keep-source-button" class="name-choice" type="button"><span><strong id="keep-source-title">Keep only here</strong><small id="keep-source-detail"></small></span></button>
+                <button id="retry-face-button" class="name-choice" type="button"><span><strong>Adjust the box to retry</strong><small>Drag the box or its corners, then retry the face.</small></span></button>
+                <label id="keep-all-failures-label" class="apply-all"><input id="keep-all-failures" type="checkbox"><span><strong>Keep all remaining rejected faces in their current library</strong><small>They will be ignored in future scans.</small></span></label>
+              </div>
+            </div>
+            <div id="failure-message" class="message" aria-live="polite"></div>
+            <div class="actions"><button id="failure-back-button" class="secondary" type="button">Back to results</button></div>
+          </div>
+          <div id="failure-review-complete" hidden>
+            <h1>Decisions saved</h1>
+            <p id="failure-complete-lead" class="lead"></p>
+            <section class="card"><p class="completion-mark" aria-hidden="true">✓</p><h2 id="failure-complete-summary"></h2><p>Faces kept in one library will not be offered again unless their name or box changes.</p></section>
+            <div class="actions"><button id="failure-finish-button" class="secondary" type="button">Start another sync</button><button id="failure-retry-button" class="primary" type="button">Retry adjusted faces</button></div>
+          </div>
+        </div>
       </section>
     </main>
   </div>

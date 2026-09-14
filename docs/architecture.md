@@ -59,6 +59,12 @@ Every operation is journalled separately. Completed operations are idempotent,
 so an interrupted run resumes with pending or failed entries and does not
 repeat completed changes.
 
+Photo-specific failures continue through the rest of Apply and enter a review
+queue. The queue shows the source face and supports an adjusted-rectangle retry
+or a persistent decision to keep the face in one library. Persistent decisions
+are keyed to the source path, person and rectangle, so editing the source face
+makes it eligible for review again.
+
 ## Notifications
 
 The service emits structured events independently of the UI. Events are stored

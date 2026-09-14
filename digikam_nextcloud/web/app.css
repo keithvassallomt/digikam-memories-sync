@@ -99,6 +99,15 @@ progress { accent-color: var(--brand); display: block; height: 18px; width: 100%
 .digikam-box small { background: #53d59a; top: 0; }
 .memories-box { border-color: #ffd166; border-style: dashed; }
 .memories-box small { background: #ffd166; bottom: 0; }
+.editable-photo-frame { touch-action: none; }
+.editable-face-box { cursor: move; pointer-events: auto; }
+.editable-face-box small { pointer-events: none; }
+.resize-handle { background: #ffffff; border: 2px solid #236b59; border-radius: 50%; height: 15px; position: absolute; width: 15px; }
+.resize-handle.top-left { cursor: nwse-resize; left: -9px; top: -9px; }
+.resize-handle.top-right { cursor: nesw-resize; right: -9px; top: -9px; }
+.resize-handle.bottom-left { bottom: -9px; cursor: nesw-resize; left: -9px; }
+.resize-handle.bottom-right { bottom: -9px; cursor: nwse-resize; right: -9px; }
+.failure-detail-card p { color: var(--muted); margin: 7px 0 0; }
 .photo-caption { color: var(--muted); font-size: 12px; margin: 7px 0 0; overflow-wrap: anywhere; }
 .name-choice { align-items: flex-start; background: var(--panel); color: var(--ink); display: flex; margin-bottom: 11px; min-height: 76px; text-align: left; width: 100%; }
 .name-choice[aria-pressed="true"] { border-color: var(--brand); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 18%, transparent); }

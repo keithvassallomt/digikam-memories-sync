@@ -89,6 +89,17 @@ CREATE TABLE IF NOT EXISTS run_actions (
     UNIQUE(run_id, position)
 );
 CREATE INDEX IF NOT EXISTS run_actions_status_idx ON run_actions(run_id, status, position);
+CREATE TABLE IF NOT EXISTS ignored_faces (
+    id INTEGER PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id),
+    source TEXT NOT NULL,
+    path TEXT NOT NULL,
+    person TEXT NOT NULL,
+    rect_json TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(profile_id, source, path, person, rect_json)
+);
 """
 
 
@@ -222,10 +233,34 @@ class StateStore:
                 raise ValueError("The saved Apply plan does not match this preview.")
             if existing:
                 saved = self.conn.execute(
-                    "SELECT action_json FROM run_actions WHERE run_id = ? ORDER BY position",
+                    """SELECT action_json,result_json FROM run_actions
+                       WHERE run_id = ? ORDER BY position""",
                     (run_id,),
                 ).fetchall()
-                if [json.loads(row[0]) for row in saved] != plan:
+                plan_matches = True
+                for row, original in zip(saved, plan, strict=True):
+                    current = json.loads(row["action_json"])
+                    if current == original:
+                        continue
+                    result = json.loads(row["result_json"] or "{}")
+                    source_rect_name = (
+                        "digikam_rect"
+                        if current.get("operation") == "insert_memories"
+                        else "nextcloud_rect"
+                    )
+                    source_rect = current.get(source_rect_name)
+                    current_without_rect = {
+                        k: v for k, v in current.items() if k not in {"rect", source_rect_name}
+                    }
+                    original_without_rect = {k: v for k, v in original.items() if k != "rect"}
+                    if not (
+                        result.get("review") == "adjusted"
+                        and source_rect == original.get("rect")
+                        and current_without_rect == original_without_rect
+                    ):
+                        plan_matches = False
+                        break
+                if not plan_matches:
                     raise ValueError("The saved Apply plan does not match this preview.")
             if not existing:
                 self.conn.executemany(
@@ -280,7 +315,7 @@ class StateStore:
         self, action_id: int, status: str, *, result: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
-        if status not in {"applied", "failed"}:
+        if status not in {"applied", "failed", "ignored"}:
             raise ValueError("Invalid action status.")
         with self.lock:
             self.conn.execute(
@@ -299,7 +334,7 @@ class StateStore:
                 (run_id,),
             ).fetchall()
         counts = {
-            "total": 0, "applied": 0, "failed": 0, "pending": 0,
+            "total": 0, "applied": 0, "failed": 0, "pending": 0, "ignored": 0,
             "memories": 0, "digikam": 0,
         }
         for row in rows:
@@ -308,6 +343,183 @@ class StateStore:
             counts[str(row["status"])] += amount
             counts[str(row["target"])] += amount
         return counts
+
+    def remaining_apply_counts(self, run_id: int) -> dict[str, int]:
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT target,COUNT(*) AS amount FROM run_actions
+                   WHERE run_id = ? AND status IN ('pending','failed') GROUP BY target""",
+                (run_id,),
+            ).fetchall()
+        result = {"total": 0, "memories": 0, "digikam": 0}
+        for row in rows:
+            amount = int(row["amount"])
+            result["total"] += amount
+            result[str(row["target"])] += amount
+        return result
+
+    @staticmethod
+    def _ignored_face_key(action: dict[str, Any]) -> tuple[str, str, str, str] | None:
+        operation = str(action.get("operation") or action.get("action") or "")
+        if operation in {"insert_memories", "insert"}:
+            source = "digikam"
+        elif operation == "create_digikam":
+            source = "memories"
+        else:
+            return None
+        try:
+            source_rect = (
+                action.get("digikam_rect", action.get("rect"))
+                if source == "digikam"
+                else action.get("nextcloud_rect", action.get("rect"))
+            )
+            rect = [round(float(value), 8) for value in source_rect]
+        except (KeyError, TypeError, ValueError):
+            return None
+        if len(rect) != 4:
+            return None
+        return (
+            source,
+            str(action.get("path", "")),
+            str(action.get("person", "")),
+            json.dumps(rect, separators=(",", ":")),
+        )
+
+    def filter_ignored_actions(
+        self, actions: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT source,path,person,rect_json FROM ignored_faces WHERE profile_id = 1"
+            ).fetchall()
+        ignored = {
+            (str(row["source"]), str(row["path"]), str(row["person"]), str(row["rect_json"]))
+            for row in rows
+        }
+        kept = [action for action in actions if self._ignored_face_key(action) not in ignored]
+        skipped = [action for action in actions if self._ignored_face_key(action) in ignored]
+        return kept, skipped
+
+    def failed_apply_actions(self, run_id: int) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT id,position,target,operation,action_json,error FROM run_actions
+                   WHERE run_id = ? AND status = 'failed' ORDER BY position""",
+                (run_id,),
+            ).fetchall()
+        failures = []
+        for row in rows:
+            action = json.loads(row["action_json"])
+            operation = str(row["operation"])
+            source = "digikam" if str(row["target"]) == "memories" else "memories"
+            failures.append({
+                "id": int(row["id"]),
+                "position": int(row["position"]),
+                "operation": operation,
+                "source": source,
+                "destination": "memories" if source == "digikam" else "digikam",
+                "path": str(action.get("path", "")),
+                "person": str(action.get("person", "")),
+                "rect": action.get("rect"),
+                "nc_file_id": action.get("nc_file_id"),
+                "error": str(row["error"] or "Unknown error"),
+                "reviewable": operation in {"insert_memories", "create_digikam"},
+            })
+        return failures
+
+    def failed_apply_action(self, run_id: int, action_id: int) -> dict[str, Any]:
+        for failure in self.failed_apply_actions(run_id):
+            if failure["id"] == action_id:
+                return failure
+        raise ValueError("Failed face change not found.")
+
+    def resolve_failed_action(
+        self,
+        run_id: int,
+        action_id: int,
+        decision: str,
+        *,
+        rect: list[float] | None = None,
+        apply_to_remaining: bool = False,
+    ) -> dict[str, Any]:
+        if decision not in {"keep_source", "retry"}:
+            raise ValueError("Choose whether to keep this face here or retry it.")
+        with self.lock:
+            run = self.conn.execute(
+                "SELECT status FROM runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            if run is None or run["status"] != "apply_failed":
+                raise ValueError("This run has no failed changes to review.")
+            row = self.conn.execute(
+                """SELECT id,operation,action_json,error FROM run_actions
+                   WHERE id = ? AND run_id = ? AND status = 'failed'""",
+                (action_id, run_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Failed face change not found.")
+
+            if decision == "retry":
+                if rect is None or len(rect) != 4:
+                    raise ValueError("The adjusted face box is invalid.")
+                values = [float(value) for value in rect]
+                x, y, width, height = values
+                if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1 or y + height > 1:
+                    raise ValueError("The adjusted face box must stay inside the photo.")
+                action = json.loads(row["action_json"])
+                if str(row["operation"]) == "insert_memories":
+                    action.setdefault("digikam_rect", action["rect"])
+                elif str(row["operation"]) == "create_digikam":
+                    action.setdefault("nextcloud_rect", action["rect"])
+                action["rect"] = values
+                self.conn.execute(
+                    """UPDATE run_actions SET status = 'pending', action_json = ?,
+                       result_json = '{"review":"adjusted"}', error = NULL
+                       WHERE id = ?""",
+                    (json.dumps(action), action_id),
+                )
+            else:
+                if self._ignored_face_key(
+                    {"operation": row["operation"], **json.loads(row["action_json"])}
+                ) is None:
+                    raise ValueError("This failure must be retried rather than kept one-sided.")
+                if apply_to_remaining:
+                    rows = self.conn.execute(
+                        """SELECT id,operation,action_json,error FROM run_actions
+                           WHERE run_id = ? AND status = 'failed'
+                           AND operation IN ('insert_memories','create_digikam')""",
+                        (run_id,),
+                    ).fetchall()
+                else:
+                    rows = [row]
+                for candidate in rows:
+                    action = json.loads(candidate["action_json"])
+                    key = self._ignored_face_key({"operation": candidate["operation"], **action})
+                    if key is None:
+                        continue
+                    self.conn.execute(
+                        """INSERT OR IGNORE INTO ignored_faces(
+                               profile_id,source,path,person,rect_json,reason)
+                           VALUES (1,?,?,?,?,?)""",
+                        (*key, str(candidate["error"] or "Kept in source library")),
+                    )
+                    self.conn.execute(
+                        "UPDATE run_actions SET status = 'ignored', error = NULL WHERE id = ?",
+                        (int(candidate["id"]),),
+                    )
+            self.conn.commit()
+        return self.failure_review(run_id)
+
+    def failure_review(self, run_id: int) -> dict[str, Any]:
+        failures = self.failed_apply_actions(run_id)
+        counts = self.apply_counts(run_id)
+        return {
+            "run_id": run_id,
+            "failures": failures,
+            "remaining": len(failures),
+            "pending": counts["pending"],
+            "ignored": counts["ignored"],
+            "applied": counts["applied"],
+        }
 
     def apply_failures(self, run_id: int, limit: int = 10) -> list[dict[str, str]]:
         with self.lock:

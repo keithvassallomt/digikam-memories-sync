@@ -308,6 +308,67 @@ class AppFoundationTests(unittest.TestCase):
             server.server_close()
             state.close()
 
+    def test_local_api_reviews_and_remembers_failed_faces(self):
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        settings.save(
+            {
+                "digikam_library": str(self.library),
+                "digikam_db": str(self.library / "digikam4.db"),
+                "nextcloud_url": "https://cloud.test",
+                "nc_user": "keith",
+            },
+            "secret",
+        )
+        photo_dir = self.library / "2026"
+        photo_dir.mkdir()
+        (photo_dir / "photo.jpg").write_bytes(b"photo-bytes")
+        action = {
+            "target": "memories",
+            "operation": "insert_memories",
+            "action": "insert",
+            "path": "2026/photo.jpg",
+            "person": "Gail Vassallo",
+            "rect": [0.1, 0.2, 0.3, 0.4],
+            "nc_file_id": 7,
+        }
+        state = StateStore(self.root / "state.sqlite3")
+        run_id = state.create_run("person")
+        state.initialize_apply(run_id, [action])
+        failed = state.pending_apply_actions(run_id)[0]
+        state.finish_apply_action(failed["id"], "failed", error="No face found")
+        state.finish_apply(run_id, "apply_failed")
+        service = AppService(settings, state)
+        server = FaceSyncHTTPServer(("127.0.0.1", 0), service)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}/api/runs/{run_id}/failures"
+        headers = {"X-Face-Sync-Token": server.api_token}
+        try:
+            with urllib.request.urlopen(urllib.request.Request(base, headers=headers)) as response:
+                listing = json.load(response)
+            self.assertEqual(listing["remaining"], 1)
+            self.assertEqual(listing["failures"][0]["source"], "digikam")
+
+            photo_url = f"{base}/{failed['id']}/photo"
+            with urllib.request.urlopen(urllib.request.Request(photo_url, headers=headers)) as response:
+                self.assertEqual(response.read(), b"photo-bytes")
+
+            request = urllib.request.Request(
+                f"{base}/{failed['id']}",
+                data=json.dumps({"decision": "keep_source"}).encode(),
+                method="POST",
+                headers={**headers, "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request) as response:
+                resolved = json.load(response)
+            self.assertEqual(resolved["status"], "applied")
+            self.assertEqual(resolved["ignored"], 1)
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+            state.close()
+
     def test_preview_records_run_conflicts_and_notification(self):
         settings = SettingsStore(self.root / "config", use_keyring=False)
         settings.save(

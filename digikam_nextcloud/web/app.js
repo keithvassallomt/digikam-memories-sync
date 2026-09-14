@@ -9,6 +9,13 @@ let currentConflictIndex = 0;
 let conflictPhotoUrl = null;
 let conflictPhotoRequest = 0;
 let currentApplyReview = null;
+let currentFailures = [];
+let currentFailureIndex = 0;
+let failurePhotoUrl = null;
+let failurePhotoRequest = 0;
+let failureCrop = null;
+let failureRect = null;
+let failureReviewTotal = 0;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -493,6 +500,7 @@ function setApplyView(view) {
   document.getElementById('apply-review').hidden = view !== 'review';
   document.getElementById('apply-progress-view').hidden = view !== 'progress';
   document.getElementById('apply-complete').hidden = view !== 'complete';
+  document.getElementById('failure-review').hidden = view !== 'failures';
 }
 
 function updateApplyButton() {
@@ -532,6 +540,204 @@ async function openApplyReview() {
   button.textContent = review.total === 1 ? 'Apply 1 change' : `Apply ${review.total.toLocaleString()} changes`;
   updateApplyButton();
 }
+
+function friendlyFailureReason(failure) {
+  if (failure.error.includes('No face found inside the supplied rectangle')) {
+    return 'Recognize could not detect a usable face inside this box.';
+  }
+  return failure.error;
+}
+
+async function loadFailurePhoto(failure) {
+  const requestNumber = ++failurePhotoRequest;
+  const image = document.getElementById('failure-photo');
+  const canvas = document.getElementById('failure-crop');
+  const loading = document.getElementById('failure-photo-loading');
+  const box = document.getElementById('failure-face-box');
+  if (failurePhotoUrl) URL.revokeObjectURL(failurePhotoUrl);
+  failurePhotoUrl = null;
+  image.hidden = true;
+  image.removeAttribute('src');
+  canvas.hidden = true;
+  box.hidden = true;
+  loading.hidden = false;
+  loading.textContent = 'Loading photo…';
+  try {
+    const blob = await apiBlob(`/api/runs/${currentRunId}/failures/${failure.id}/photo`);
+    if (requestNumber !== failurePhotoRequest) return;
+    failurePhotoUrl = URL.createObjectURL(blob);
+    image.onload = () => {
+      if (requestNumber !== failurePhotoRequest) return;
+      failureCrop = conflictCrop(
+        [failureRect],
+        image.naturalWidth,
+        image.naturalHeight,
+        canvas.width / canvas.height,
+      );
+      const context = canvas.getContext('2d');
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(
+        image,
+        failureCrop.x * image.naturalWidth,
+        failureCrop.y * image.naturalHeight,
+        failureCrop.width * image.naturalWidth,
+        failureCrop.height * image.naturalHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+      loading.hidden = true;
+      canvas.hidden = false;
+      placeFaceBox(box, failureRect, failureCrop);
+    };
+    image.onerror = () => {
+      if (requestNumber !== failurePhotoRequest) return;
+      loading.hidden = false;
+      loading.textContent = 'This photo could not be previewed.';
+    };
+    image.src = failurePhotoUrl;
+  } catch (error) {
+    if (requestNumber !== failurePhotoRequest) return;
+    loading.hidden = false;
+    loading.textContent = error.message;
+  }
+}
+
+function showFailure(index) {
+  currentFailureIndex = index;
+  const failure = currentFailures[index];
+  const source = failure.source === 'digikam' ? 'digiKam' : 'Memories';
+  const destination = failure.destination === 'digikam' ? 'digiKam' : 'Memories';
+  failureRect = failure.rect.map(Number);
+  document.getElementById('failure-review-item').hidden = false;
+  document.getElementById('failure-review-complete').hidden = true;
+  const handled = failureReviewTotal - currentFailures.length;
+  document.getElementById('failure-position').textContent = `${handled + index + 1} / ${failureReviewTotal}`;
+  document.getElementById('failure-lead').textContent = `${currentFailures.length} faces still need a decision.`;
+  document.getElementById('failure-path').textContent = failure.path;
+  document.getElementById('failure-person').textContent = failure.person || 'Unnamed face';
+  document.getElementById('failure-location').textContent = `Found in ${source} · missing from ${destination}`;
+  document.getElementById('failure-reason').textContent = friendlyFailureReason(failure);
+  document.getElementById('failure-box-label').textContent = `${source}: ${failure.person || 'Unnamed'}`;
+  document.getElementById('keep-source-title').textContent = `Keep only in ${source}`;
+  document.getElementById('keep-source-detail').textContent = `Remember this choice and do not offer the face in future scans.`;
+  document.getElementById('keep-all-failures').checked = false;
+  document.getElementById('keep-all-failures-label').hidden = !failure.reviewable;
+  document.getElementById('keep-source-button').hidden = !failure.reviewable;
+  document.getElementById('keep-source-button').disabled = false;
+  document.getElementById('retry-face-button').disabled = failure.reviewable;
+  const messageBox = document.getElementById('failure-message');
+  messageBox.textContent = '';
+  messageBox.className = 'message';
+  loadFailurePhoto(failure);
+}
+
+function showFailureReviewComplete(result) {
+  document.getElementById('failure-review-item').hidden = true;
+  document.getElementById('failure-review-complete').hidden = false;
+  const pending = result.pending || 0;
+  const ignored = result.ignored || 0;
+  document.getElementById('failure-complete-lead').textContent = pending
+    ? `${pending} adjusted face${pending === 1 ? '' : 's'} ready to retry.`
+    : 'Every rejected face now has a saved decision.';
+  document.getElementById('failure-complete-summary').textContent = `${ignored} kept in one library · ${pending} ready to retry`;
+  document.getElementById('failure-retry-button').hidden = pending === 0;
+}
+
+async function openFailureReview() {
+  const result = await api(`/api/runs/${currentRunId}/failures`);
+  currentFailures = result.failures;
+  failureReviewTotal = result.remaining + result.pending + result.ignored;
+  setApplyView('failures');
+  if (currentFailures.length) showFailure(0);
+  else showFailureReviewComplete(result);
+}
+
+async function resolveCurrentFailure(decision) {
+  const failure = currentFailures[currentFailureIndex];
+  const keepButton = document.getElementById('keep-source-button');
+  const retryButton = document.getElementById('retry-face-button');
+  const messageBox = document.getElementById('failure-message');
+  keepButton.disabled = true;
+  retryButton.disabled = true;
+  messageBox.textContent = 'Saving choice…';
+  messageBox.className = 'message';
+  try {
+    const result = await api(`/api/runs/${currentRunId}/failures/${failure.id}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        decision,
+        rect: failureRect,
+        apply_to_remaining: decision === 'keep_source' && document.getElementById('keep-all-failures').checked,
+      }),
+    });
+    currentFailures = result.failures;
+    if (!currentFailures.length) showFailureReviewComplete(result);
+    else showFailure(Math.min(currentFailureIndex, currentFailures.length - 1));
+  } catch (error) {
+    messageBox.textContent = error.message;
+    messageBox.className = 'message error';
+    keepButton.disabled = false;
+    retryButton.disabled = false;
+  }
+}
+
+let failureDrag = null;
+document.getElementById('failure-face-box').addEventListener('pointerdown', (event) => {
+  if (!failureCrop || !failureRect) return;
+  event.preventDefault();
+  failureDrag = {
+    x: event.clientX,
+    y: event.clientY,
+    rect: [...failureRect],
+    corner: event.target.dataset.corner || 'move',
+  };
+  event.currentTarget.setPointerCapture(event.pointerId);
+});
+
+document.getElementById('failure-face-box').addEventListener('pointermove', (event) => {
+  if (!failureDrag || !failureCrop) return;
+  const frame = document.getElementById('failure-photo-frame').getBoundingClientRect();
+  const dx = (event.clientX - failureDrag.x) * failureCrop.width / frame.width;
+  const dy = (event.clientY - failureDrag.y) * failureCrop.height / frame.height;
+  let [left, top, width, height] = failureDrag.rect;
+  let right = left + width;
+  let bottom = top + height;
+  const minSize = 0.01;
+  const cropRight = failureCrop.x + failureCrop.width;
+  const cropBottom = failureCrop.y + failureCrop.height;
+  if (failureDrag.corner === 'move') {
+    left = Math.max(failureCrop.x, Math.min(cropRight - width, left + dx));
+    top = Math.max(failureCrop.y, Math.min(cropBottom - height, top + dy));
+    right = left + width;
+    bottom = top + height;
+  } else {
+    if (failureDrag.corner.includes('left')) left = Math.max(failureCrop.x, Math.min(right - minSize, left + dx));
+    if (failureDrag.corner.includes('right')) right = Math.min(cropRight, Math.max(left + minSize, right + dx));
+    if (failureDrag.corner.includes('top')) top = Math.max(failureCrop.y, Math.min(bottom - minSize, top + dy));
+    if (failureDrag.corner.includes('bottom')) bottom = Math.min(cropBottom, Math.max(top + minSize, bottom + dy));
+  }
+  failureRect = [left, top, right - left, bottom - top];
+  placeFaceBox(document.getElementById('failure-face-box'), failureRect, failureCrop);
+  document.getElementById('retry-face-button').disabled = false;
+});
+
+document.getElementById('failure-face-box').addEventListener('pointerup', () => {
+  failureDrag = null;
+});
+
+document.getElementById('keep-source-button').addEventListener('click', () => resolveCurrentFailure('keep_source'));
+document.getElementById('retry-face-button').addEventListener('click', () => resolveCurrentFailure('retry'));
+document.getElementById('failure-back-button').addEventListener('click', async () => {
+  failurePhotoRequest += 1;
+  const status = await api(`/api/runs/${currentRunId}`);
+  showApplyComplete(status);
+});
+document.getElementById('failure-retry-button').addEventListener('click', openApplyReview);
+document.getElementById('failure-finish-button').addEventListener('click', () => {
+  document.getElementById('new-sync-button').click();
+});
 
 document.getElementById('digikam-closed').addEventListener('change', updateApplyButton);
 
@@ -585,11 +791,12 @@ function updateApplyProgress(status) {
   const total = data.total || status.apply?.total || 0;
   const completed = data.applied || status.apply?.applied || 0;
   const failed = data.failed || status.apply?.failed || 0;
+  const ignored = data.ignored || status.apply?.ignored || 0;
   if (total > 0) {
     progress.max = total;
-    progress.value = Math.min(completed + failed, total);
-    document.getElementById('apply-percent').textContent = `${Math.floor(100 * (completed + failed) / total)}%`;
-    document.getElementById('apply-count').textContent = `${(completed + failed).toLocaleString()} of ${total.toLocaleString()} changes checked`;
+    progress.value = Math.min(completed + failed + ignored, total);
+    document.getElementById('apply-percent').textContent = `${Math.floor(100 * (completed + failed + ignored) / total)}%`;
+    document.getElementById('apply-count').textContent = `${(completed + failed + ignored).toLocaleString()} of ${total.toLocaleString()} changes checked`;
   }
   document.getElementById('apply-completed-count').textContent = completed.toLocaleString();
   document.getElementById('apply-failed-count').textContent = failed.toLocaleString();
@@ -603,13 +810,16 @@ function showApplyComplete(status) {
   const applied = status.apply?.applied || 0;
   const failed = status.apply?.failed || 0;
   const pending = status.apply?.pending || 0;
+  const ignored = status.apply?.ignored || 0;
   const successful = status.status === 'applied';
   document.getElementById('apply-complete-heading').textContent = successful ? 'Changes applied' : 'Some changes need attention';
   document.getElementById('apply-complete-lead').textContent = successful
-    ? 'Both libraries now contain the approved face changes.'
+    ? (ignored ? 'All changes are handled. One-sided faces you kept were remembered.' : 'Both libraries now contain the approved face changes.')
     : `${failed + pending} changes did not finish. The completed changes are saved and will not be repeated.`;
   document.getElementById('apply-complete-summary').textContent = successful
-    ? `${applied.toLocaleString()} face changes completed`
+    ? (ignored
+      ? `${applied.toLocaleString()} completed · ${ignored.toLocaleString()} kept in one library`
+      : `${applied.toLocaleString()} face changes completed`)
     : `${applied.toLocaleString()} completed · ${failed.toLocaleString()} failed · ${pending.toLocaleString()} waiting`;
   const mark = document.getElementById('apply-completion-mark');
   mark.textContent = successful ? '✓' : '!';
@@ -624,7 +834,9 @@ function showApplyComplete(status) {
     errors.appendChild(item);
   });
   errors.hidden = errors.children.length === 0;
-  document.getElementById('retry-apply-button').hidden = successful;
+  const reviewButton = document.getElementById('retry-apply-button');
+  reviewButton.hidden = successful;
+  reviewButton.textContent = failed === 1 ? 'Review failed face' : `Review ${failed.toLocaleString()} failed faces`;
 }
 
 async function waitForApply(runId) {
@@ -659,7 +871,7 @@ document.getElementById('apply-button').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('retry-apply-button').addEventListener('click', openApplyReview);
+document.getElementById('retry-apply-button').addEventListener('click', openFailureReview);
 
 document.getElementById('new-sync-button').addEventListener('click', () => {
   currentRunId = null;

@@ -69,6 +69,8 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                     self._json(HTTPStatus.OK, self.server.app.apply_review(run_id))
                 elif len(parts) == 4 and parts[3] == "conflicts":
                     self._json(HTTPStatus.OK, self.server.app.conflicts(run_id))
+                elif len(parts) == 4 and parts[3] == "failures":
+                    self._json(HTTPStatus.OK, self.server.app.failures(run_id))
                 elif (
                     len(parts) == 6
                     and parts[3] == "conflicts"
@@ -77,6 +79,16 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                     conflict_id = int(parts[4])
                     body, content_type = self.server.app.conflict_photo(
                         run_id, conflict_id
+                    )
+                    self._bytes(HTTPStatus.OK, body, content_type)
+                elif (
+                    len(parts) == 6
+                    and parts[3] == "failures"
+                    and parts[5] == "photo"
+                ):
+                    action_id = int(parts[4])
+                    body, content_type = self.server.app.failure_photo(
+                        run_id, action_id
                     )
                     self._bytes(HTTPStatus.OK, body, content_type)
                 else:
@@ -116,6 +128,13 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                     self._json(
                         HTTPStatus.OK,
                         self.server.app.resolve_conflict(
+                            int(parts[2]), int(parts[4]), payload
+                        ),
+                    )
+                elif len(parts) == 5 and parts[3] == "failures":
+                    self._json(
+                        HTTPStatus.OK,
+                        self.server.app.resolve_failure(
                             int(parts[2]), int(parts[4]), payload
                         ),
                     )

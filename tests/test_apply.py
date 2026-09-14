@@ -243,6 +243,109 @@ class ApplyPlanTests(unittest.TestCase):
 
 
 class ApplyServiceTests(unittest.TestCase):
+    @staticmethod
+    def failed_face_action() -> dict:
+        return {
+            "target": "memories",
+            "operation": "insert_memories",
+            "action": "insert",
+            "path": "2026/photo.jpg",
+            "person": "Gail Vassallo",
+            "rect": [0.1, 0.2, 0.3, 0.4],
+            "nc_file_id": 7,
+        }
+
+    def test_keep_source_suppresses_the_same_face_in_future_previews(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = StateStore(Path(temp) / "state.sqlite3")
+            try:
+                run_id = state.create_run("person")
+                action = self.failed_face_action()
+                state.initialize_apply(run_id, [action])
+                pending = state.pending_apply_actions(run_id)[0]
+                state.finish_apply_action(
+                    pending["id"], "failed", error="No face found"
+                )
+                state.finish_apply(run_id, "apply_failed")
+
+                review = state.resolve_failed_action(
+                    run_id, pending["id"], "keep_source"
+                )
+
+                self.assertEqual(review["remaining"], 0)
+                self.assertEqual(review["ignored"], 1)
+                kept, ignored = state.filter_ignored_actions([action])
+                self.assertEqual(kept, [])
+                self.assertEqual(ignored, [action])
+            finally:
+                state.close()
+
+    def test_adjusted_face_returns_to_the_pending_apply_queue(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = StateStore(Path(temp) / "state.sqlite3")
+            try:
+                run_id = state.create_run("person")
+                state.initialize_apply(run_id, [self.failed_face_action()])
+                pending = state.pending_apply_actions(run_id)[0]
+                state.finish_apply_action(
+                    pending["id"], "failed", error="No face found"
+                )
+                state.finish_apply(run_id, "apply_failed")
+
+                review = state.resolve_failed_action(
+                    run_id,
+                    pending["id"],
+                    "retry",
+                    rect=[0.12, 0.18, 0.34, 0.46],
+                )
+
+                self.assertEqual(review["remaining"], 0)
+                self.assertEqual(review["pending"], 1)
+                state.initialize_apply(run_id, [self.failed_face_action()])
+                queued = state.pending_apply_actions(run_id)[0]["action"]
+                self.assertEqual(queued["rect"], [0.12, 0.18, 0.34, 0.46])
+                self.assertEqual(queued["digikam_rect"], [0.1, 0.2, 0.3, 0.4])
+                state.finish_apply_action(
+                    pending["id"], "failed", error="Still no face found"
+                )
+                state.finish_apply(run_id, "apply_failed")
+                state.resolve_failed_action(run_id, pending["id"], "keep_source")
+                kept, ignored = state.filter_ignored_actions(
+                    [self.failed_face_action()]
+                )
+                self.assertEqual(kept, [])
+                self.assertEqual(len(ignored), 1)
+            finally:
+                state.close()
+
+    def test_resolving_the_last_failure_finishes_the_run(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            state = StateStore(root / "state.sqlite3")
+            service = AppService(
+                SettingsStore(root / "config", use_keyring=False), state
+            )
+            try:
+                run_id = state.create_run("person")
+                state.initialize_apply(run_id, [self.failed_face_action()])
+                pending = state.pending_apply_actions(run_id)[0]
+                state.finish_apply_action(
+                    pending["id"], "failed", error="No face found"
+                )
+                state.finish_apply(run_id, "apply_failed")
+
+                result = service.resolve_failure(
+                    run_id,
+                    pending["id"],
+                    {"decision": "keep_source"},
+                )
+
+                self.assertEqual(result["status"], "applied")
+                self.assertEqual(state.run(run_id)["status"], "applied")
+                self.assertEqual(state.run(run_id)["apply"]["ignored"], 1)
+            finally:
+                state.close()
+
     def test_only_systemic_failures_trigger_the_apply_safety_stop(self):
         self.assertFalse(is_systemic_apply_failure(RuntimeError(
             "Recognize face-import failed (HTTP 422): No face found inside the supplied rectangle"

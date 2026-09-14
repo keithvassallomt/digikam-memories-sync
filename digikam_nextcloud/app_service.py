@@ -218,12 +218,17 @@ class AppService:
             raise ValueError("This preview is not ready to apply.")
         conflicts = self.state.conflicts_for_run(run_id)
         plan = build_apply_plan(run["result"], conflicts)
+        summary = (
+            self.state.remaining_apply_counts(run_id)
+            if run.get("apply") is not None
+            else plan_summary(plan)
+        )
         return {
             "run_id": run_id,
-            **plan_summary(plan),
+            **summary,
             "conflicts": conflicts["total"],
             "digikam_running": digikam_is_running(),
-            "requires_digikam_closed": any(item["target"] == "digikam" for item in plan),
+            "requires_digikam_closed": summary["digikam"] > 0,
             "status": run["status"],
             "apply": run.get("apply"),
         }
@@ -253,7 +258,14 @@ class AppService:
             if active:
                 raise ValueError("Another Face Sync job is already running.")
             self.state.initialize_apply(run_id, plan)
-            self.state.update_progress(run_id, "starting_apply", 0, len(plan), plan_summary(plan))
+            counts = self.state.apply_counts(run_id)
+            self.state.update_progress(
+                run_id,
+                "starting_apply",
+                counts["applied"] + counts["ignored"],
+                counts["total"],
+                counts,
+            )
             thread = threading.Thread(
                 target=self._apply_job,
                 args=(run_id,),
@@ -322,7 +334,7 @@ class AppService:
                 self.state.update_progress(
                     run_id,
                     "applying",
-                    counts["applied"] + counts["failed"],
+                    counts["applied"] + counts["failed"] + counts["ignored"],
                     counts["total"],
                     counts,
                 )
@@ -335,16 +347,21 @@ class AppService:
             self.state.update_progress(
                 run_id,
                 "completed" if final_status == "applied" else "apply_failed",
-                final["applied"] + final["failed"],
+                final["applied"] + final["failed"] + final["ignored"],
                 final["total"],
                 final,
                 error=None if final_status == "applied" else "Some changes could not be applied.",
             )
             if final_status == "applied":
+                message = (
+                    f"{final['applied']} face changes completed."
+                    if not final["ignored"]
+                    else f"{final['applied']} face changes completed and {final['ignored']} kept in one library."
+                )
                 self.state.create_notification(
                     "apply.completed",
                     f"Updated {final['applied']} faces",
-                    f"{final['memories']} Memories changes and {final['digikam']} digiKam changes completed.",
+                    message,
                     f"/runs/{run_id}",
                     run_id=run_id,
                 )
@@ -360,7 +377,7 @@ class AppService:
             LOG.exception("Apply %s failed", run_id)
             final = self.state.finish_apply(run_id, "apply_failed")
             self.state.update_progress(
-                run_id, "apply_failed", final["applied"] + final["failed"],
+                run_id, "apply_failed", final["applied"] + final["failed"] + final["ignored"],
                 final["total"], final, error=str(error),
             )
             self.state.create_notification(
@@ -387,22 +404,69 @@ class AppService:
             apply_to_remaining=apply_to_remaining,
         )
 
+    def failures(self, run_id: int) -> dict[str, Any]:
+        run = self.state.run(run_id)
+        if run is None or run["status"] != "apply_failed":
+            raise ValueError("This run has no failed changes to review.")
+        return self.state.failure_review(run_id)
+
+    def resolve_failure(
+        self, run_id: int, action_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        decision = str(payload.get("decision", ""))
+        rect_value = payload.get("rect")
+        rect = [float(value) for value in rect_value] if isinstance(rect_value, list) else None
+        result = self.state.resolve_failed_action(
+            run_id,
+            action_id,
+            decision,
+            rect=rect,
+            apply_to_remaining=payload.get("apply_to_remaining") is True,
+        )
+        if result["remaining"] == 0 and result["pending"] == 0:
+            final = self.state.finish_apply(run_id, "applied")
+            self.state.update_progress(
+                run_id,
+                "completed",
+                final["applied"] + final["ignored"],
+                final["total"],
+                final,
+            )
+            self.state.create_notification(
+                "apply.completed",
+                "Face decisions saved",
+                f"{final['applied']} changes completed and {final['ignored']} kept in one library.",
+                f"/runs/{run_id}",
+                run_id=run_id,
+            )
+            result["status"] = "applied"
+        else:
+            result["status"] = "apply_failed"
+        return result
+
     def conflict_photo(self, run_id: int, conflict_id: int) -> tuple[bytes, str]:
         conflict = self.state.conflict_for_run(run_id, conflict_id)
+        return self._review_photo(conflict, "conflict")
+
+    def failure_photo(self, run_id: int, action_id: int) -> tuple[bytes, str]:
+        failure = self.state.failed_apply_action(run_id, action_id)
+        return self._review_photo(failure, "failed face")
+
+    def _review_photo(self, item: dict[str, Any], description: str) -> tuple[bytes, str]:
         settings = self.settings.load()
         library_value = settings.get("digikam_library")
         if not library_value:
             raise ValueError("The digiKam library location is unavailable.")
         library = Path(str(library_value)).expanduser().resolve()
-        photo = (library / str(conflict.get("path", ""))).resolve()
+        photo = (library / str(item.get("path", ""))).resolve()
         try:
             photo.relative_to(library)
         except ValueError as error:
-            raise ValueError("The conflict photo path is invalid.") from error
+            raise ValueError(f"The {description} photo path is invalid.") from error
         if not photo.is_file():
-            raise ValueError("The conflict photo is not available locally.")
+            raise ValueError(f"The {description} photo is not available locally.")
         if photo.suffix.lower() not in BROWSER_IMAGE_EXTENSIONS:
-            file_id = conflict.get("nc_file_id")
+            file_id = item.get("nc_file_id")
             user_id = str(settings.get("nc_user", ""))
             password = self.settings.password(user_id)
             if file_id is None or not user_id or not password:
@@ -511,6 +575,14 @@ class AppService:
                     ),
                 )
             data = report.to_dict()
+            actions, ignored_actions = self.state.filter_ignored_actions(data["actions"])
+            data["actions"] = actions
+            for action in ignored_actions:
+                if action.get("action") == "insert":
+                    data["summary"]["inserted"] -= 1
+                elif action.get("action") == "create_digikam":
+                    data["summary"]["created_in_digikam"] -= 1
+            data["summary"]["ignored"] = len(ignored_actions)
             summary = data["summary"]
             result = {
                 "run_id": run_id,

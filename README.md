@@ -57,6 +57,10 @@ confirmation. If digiKam remains open without a visible window, the Apply page
 can ask it to close and waits until it releases the database. Preview runs,
 notifications, conflict decisions, operation
 results and face links are persisted in the application state database.
+If a model rejects an individual face, the result screen shows a zoomed review
+with its source name and rectangle. The user can adjust the rectangle for a
+targeted retry or keep the face in its source library; remembered one-sided
+faces are suppressed in later previews unless their source box changes.
 
 Backups are stored under the application's configuration directory in
 `backups/`. On Linux this is normally
