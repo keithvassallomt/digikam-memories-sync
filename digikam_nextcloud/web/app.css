@@ -89,15 +89,16 @@ progress { accent-color: var(--brand); display: block; height: 18px; width: 100%
 .conflict-heading { align-items: flex-start; display: flex; justify-content: space-between; }
 .conflict-position { color: var(--muted); font-size: 14px; font-weight: 500; white-space: nowrap; }
 .conflict-grid { display: grid; gap: 20px; grid-template-columns: minmax(0, 1.35fr) minmax(250px, .65fr); }
-.conflict-photo-frame { background: #0b1012; border-radius: 12px; display: inline-block; max-width: 100%; min-height: 220px; min-width: min(100%, 320px); overflow: hidden; position: relative; vertical-align: top; }
-.conflict-photo-frame img { display: block; height: auto; max-height: 58vh; max-width: 100%; width: auto; }
+.conflict-photo-frame { aspect-ratio: 4 / 3; background: #0b1012; border-radius: 12px; max-width: 100%; min-height: 220px; overflow: hidden; position: relative; width: 100%; }
+.conflict-photo-frame img { display: none; }
+.conflict-photo-frame canvas { display: block; height: 100%; width: 100%; }
 .photo-message { color: #dce5e8; display: grid; inset: 0; min-height: 220px; place-items: center; position: absolute; }
 .face-box { border: 3px solid; pointer-events: none; position: absolute; }
-.face-box small { color: #111; font-size: 11px; font-weight: 600; left: -3px; padding: 3px 5px; position: absolute; white-space: nowrap; }
+.face-box small { color: #111; font-size: 11px; font-weight: 600; left: 0; max-width: max-content; overflow: hidden; padding: 3px 5px; position: absolute; text-overflow: ellipsis; white-space: nowrap; }
 .digikam-box { border-color: #53d59a; }
-.digikam-box small { background: #53d59a; bottom: 100%; }
+.digikam-box small { background: #53d59a; top: 0; }
 .memories-box { border-color: #ffd166; border-style: dashed; }
-.memories-box small { background: #ffd166; top: 100%; }
+.memories-box small { background: #ffd166; bottom: 0; }
 .photo-caption { color: var(--muted); font-size: 12px; margin: 7px 0 0; overflow-wrap: anywhere; }
 .name-choice { align-items: flex-start; background: var(--panel); color: var(--ink); display: flex; margin-bottom: 11px; min-height: 76px; text-align: left; width: 100%; }
 .name-choice[aria-pressed="true"] { border-color: var(--brand); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 18%, transparent); }

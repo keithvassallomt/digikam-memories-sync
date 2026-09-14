@@ -171,11 +171,31 @@ function showPreview(result) {
   steps[2].classList.add('current');
 }
 
-function placeFaceBox(element, rect) {
-  element.style.left = `${100 * rect[0]}%`;
-  element.style.top = `${100 * rect[1]}%`;
-  element.style.width = `${100 * rect[2]}%`;
-  element.style.height = `${100 * rect[3]}%`;
+function conflictCrop(rectangles) {
+  const left = Math.min(...rectangles.map((rect) => rect[0]));
+  const top = Math.min(...rectangles.map((rect) => rect[1]));
+  const right = Math.max(...rectangles.map((rect) => rect[0] + rect[2]));
+  const bottom = Math.max(...rectangles.map((rect) => rect[1] + rect[3]));
+  const centreX = (left + right) / 2;
+  const centreY = (top + bottom) / 2;
+  const faceWidth = Math.max(0.01, right - left);
+  const faceHeight = Math.max(0.01, bottom - top);
+  const padding = Math.max(0.04, Math.max(faceWidth, faceHeight) * 0.7);
+  let width = Math.min(1, Math.max(0.18, faceWidth + 2 * padding));
+  let height = Math.min(1, Math.max(0.135, faceHeight + 2 * padding));
+  const targetAspect = 4 / 3;
+  if (width / height < targetAspect) width = Math.min(1, height * targetAspect);
+  else height = Math.min(1, width / targetAspect);
+  const x = Math.max(0, Math.min(1 - width, centreX - width / 2));
+  const y = Math.max(0, Math.min(1 - height, centreY - height / 2));
+  return { x, y, width, height };
+}
+
+function placeFaceBox(element, rect, crop) {
+  element.style.left = `${100 * (rect[0] - crop.x) / crop.width}%`;
+  element.style.top = `${100 * (rect[1] - crop.y) / crop.height}%`;
+  element.style.width = `${100 * rect[2] / crop.width}%`;
+  element.style.height = `${100 * rect[3] / crop.height}%`;
   element.hidden = false;
 }
 
@@ -189,6 +209,7 @@ function chooseResolution(resolution) {
 async function loadConflictPhoto(conflict) {
   const requestNumber = ++conflictPhotoRequest;
   const image = document.getElementById('conflict-photo');
+  const canvas = document.getElementById('conflict-crop');
   const loading = document.getElementById('photo-loading');
   const digikamBox = document.getElementById('digikam-face-box');
   const memoriesBox = document.getElementById('memories-face-box');
@@ -196,6 +217,7 @@ async function loadConflictPhoto(conflict) {
   conflictPhotoUrl = null;
   image.hidden = true;
   image.removeAttribute('src');
+  canvas.hidden = true;
   digikamBox.hidden = true;
   memoriesBox.hidden = true;
   loading.hidden = false;
@@ -206,10 +228,24 @@ async function loadConflictPhoto(conflict) {
     conflictPhotoUrl = URL.createObjectURL(blob);
     image.onload = () => {
       if (requestNumber !== conflictPhotoRequest) return;
+      const crop = conflictCrop([conflict.digikam_rect, conflict.nextcloud_rect]);
+      const context = canvas.getContext('2d');
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(
+        image,
+        crop.x * image.naturalWidth,
+        crop.y * image.naturalHeight,
+        crop.width * image.naturalWidth,
+        crop.height * image.naturalHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
       loading.hidden = true;
-      image.hidden = false;
-      placeFaceBox(digikamBox, conflict.digikam_rect);
-      placeFaceBox(memoriesBox, conflict.nextcloud_rect);
+      canvas.hidden = false;
+      placeFaceBox(digikamBox, conflict.digikam_rect, crop);
+      placeFaceBox(memoriesBox, conflict.nextcloud_rect, crop);
     };
     image.onerror = () => {
       if (requestNumber !== conflictPhotoRequest) return;
@@ -237,6 +273,12 @@ function showConflict(index) {
   document.getElementById('conflict-overlap').textContent = `The two face boxes overlap ${Math.round(100 * conflict.iou)}%.`;
   document.getElementById('digikam-choice-name').textContent = conflict.digikam_person || 'Unnamed';
   document.getElementById('memories-choice-name').textContent = conflict.nextcloud_person || 'Unnamed';
+  document.getElementById('digikam-box-label').textContent = `digiKam: ${conflict.digikam_person || 'Unnamed'}`;
+  document.getElementById('memories-box-label').textContent = `Memories: ${conflict.nextcloud_person || 'Unnamed'}`;
+  document.getElementById('conflict-crop').setAttribute(
+    'aria-label',
+    `Zoomed face conflict: digiKam says ${conflict.digikam_person || 'Unnamed'}; Memories says ${conflict.nextcloud_person || 'Unnamed'}`,
+  );
   document.getElementById('keep-digikam-button').setAttribute('aria-pressed', 'false');
   document.getElementById('keep-memories-button').setAttribute('aria-pressed', 'false');
   document.getElementById('save-conflict-button').disabled = true;

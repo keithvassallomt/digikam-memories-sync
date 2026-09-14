@@ -120,8 +120,9 @@
               <div id="conflict-photo-frame" class="conflict-photo-frame">
                 <span id="photo-loading" class="photo-message">Loading photo…</span>
                 <img id="conflict-photo" alt="" hidden>
-                <span id="digikam-face-box" class="face-box digikam-box" hidden><small>digiKam</small></span>
-                <span id="memories-face-box" class="face-box memories-box" hidden><small>Memories</small></span>
+                <canvas id="conflict-crop" width="960" height="720" role="img" aria-label="Zoomed conflict face" hidden></canvas>
+                <span id="digikam-face-box" class="face-box digikam-box" hidden><small id="digikam-box-label"></small></span>
+                <span id="memories-face-box" class="face-box memories-box" hidden><small id="memories-box-label"></small></span>
               </div>
               <p id="conflict-path" class="photo-caption"></p>
               <p id="conflict-overlap" class="photo-caption"></p>
