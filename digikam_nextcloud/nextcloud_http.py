@@ -41,6 +41,50 @@ class NextcloudConnectionError(RuntimeError):
 class RecognizeNotInstalledError(NextcloudConnectionError):
     """The Nextcloud Recognize app is not installed or enabled."""
 
+
+def fetch_file_preview(
+    base_url: str,
+    user_id: str,
+    password: str,
+    file_id: int,
+    *,
+    dimension: int = 1600,
+) -> tuple[bytes, str]:
+    """Fetch a browser-compatible, aspect-preserving Nextcloud file preview."""
+    auth_value = base64.b64encode(f"{user_id}:{password}".encode()).decode()
+    client = KeepAliveHttpClient(
+        base_url,
+        default_headers={
+            "Authorization": f"Basic {auth_value}",
+            "User-Agent": "digikam-memories-sync/0.1",
+        },
+        timeout=60.0,
+        ssl_context=ssl.create_default_context(),
+    )
+    query = urllib.parse.urlencode(
+        {
+            "fileId": int(file_id),
+            "x": int(dimension),
+            "y": int(dimension),
+            "a": 1,
+            "mode": "contain",
+        }
+    )
+    try:
+        status, headers, body = client.request(
+            "GET",
+            f"index.php/core/preview?{query}",
+            headers={"Accept": "image/jpeg,image/png,image/webp"},
+        )
+    finally:
+        client.close()
+    content_type = headers.get("content-type", "").split(";", 1)[0].strip()
+    if status != 200 or not body or not content_type.startswith("image/"):
+        raise NextcloudConnectionError(
+            f"Nextcloud could not generate this photo preview (HTTP {status})."
+        )
+    return body, content_type
+
 # Photos app embeds: <input type="hidden" id="initial-state-photos-recognizeApiKey" value="…">
 _INITIAL_STATE_RE = re.compile(
     r'id=["\']initial-state-photos-recognizeApiKey["\'][^>]*value=["\']([^"\']+)["\']'

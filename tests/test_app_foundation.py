@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from digikam_nextcloud.app_service import AppService, resolve_digikam_database
 from digikam_nextcloud.local_server import FaceSyncHTTPServer
@@ -171,6 +172,25 @@ class AppFoundationTests(unittest.TestCase):
             other_id = state.conflicts_for_run(other_run)["conflicts"][0]["id"]
             with self.assertRaisesRegex(ValueError, "path is invalid"):
                 service.conflict_photo(other_run, other_id)
+
+            heic = photo_dir / "photo.heic"
+            heic.write_bytes(b"heic-original")
+            heic_run = state.create_run("person")
+            state.save_conflicts(
+                heic_run,
+                [{"path": "2026/photo.heic", "nc_file_id": 77}],
+            )
+            heic_id = state.conflicts_for_run(heic_run)["conflicts"][0]["id"]
+            with patch(
+                "digikam_nextcloud.app_service.fetch_file_preview",
+                return_value=(b"jpeg-preview", "image/jpeg"),
+            ) as fetch_preview:
+                body, content_type = service.conflict_photo(heic_run, heic_id)
+            self.assertEqual(body, b"jpeg-preview")
+            self.assertEqual(content_type, "image/jpeg")
+            fetch_preview.assert_called_once_with(
+                "https://cloud.test", "keith", "secret", 77
+            )
         finally:
             state.close()
 

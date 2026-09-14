@@ -11,13 +11,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .digikam import DigikamDB
-from .nextcloud_http import NextcloudHTTP
+from .nextcloud_http import NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
 from .settings import SettingsStore
 from .state_store import StateStore
 from .sync import sync
 
 REQUIRED_DIGIKAM_TABLES = {"Images", "Tags", "TagProperties", "ImageTagProperties"}
+BROWSER_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"}
 LOG = logging.getLogger(__name__)
 
 
@@ -214,6 +215,18 @@ class AppService:
             raise ValueError("The conflict photo path is invalid.") from error
         if not photo.is_file():
             raise ValueError("The conflict photo is not available locally.")
+        if photo.suffix.lower() not in BROWSER_IMAGE_EXTENSIONS:
+            file_id = conflict.get("nc_file_id")
+            user_id = str(settings.get("nc_user", ""))
+            password = self.settings.password(user_id)
+            if file_id is None or not user_id or not password:
+                raise ValueError("A browser-compatible preview is unavailable.")
+            return fetch_file_preview(
+                str(settings["nextcloud_url"]),
+                user_id,
+                password,
+                int(file_id),
+            )
         content_type = mimetypes.guess_type(photo.name)[0] or "application/octet-stream"
         if not content_type.startswith("image/"):
             raise ValueError("The conflict file is not a supported image.")
