@@ -135,6 +135,10 @@ class RegionAction:
     nc_file_id: Optional[int] = None
     nc_detection_id: Optional[int] = None
     nc_cluster_id: Optional[int] = None
+    digikam_image_id: Optional[int] = None
+    digikam_tag_id: Optional[int] = None
+    nc_dav_parent: str = ""
+    nc_file_name: str = ""
 
 
 @dataclass

@@ -3,10 +3,10 @@
 This project reconciles face names and rectangles between a local digiKam
 library and Nextcloud Memories/Recognize.
 
-The first public release will support changes in both directions. The guided
-desktop UI now previews digiKam → Memories and Memories → digiKam changes and
-provides a photo-based conflict review. The safe Apply flow and sync ledger
-remain before the first usable release.
+The guided desktop UI previews and applies changes in both directions. It
+provides photo-based conflict review, creates a consistent digiKam database
+backup before local writes, and records each operation so an interrupted Apply
+can resume without repeating completed changes.
 
 ## Repository layout
 
@@ -50,7 +50,12 @@ Command-line runs are previews unless `--apply` is supplied. The desktop
 release will not be marked usable until synchronization works in both
 directions.
 
-The current interface implements first-run setup, All/One-person selection and
-a read-only two-way preview. Preview runs, notifications and conflict decisions
-are persisted in the application state database. The Apply flow remains
-disabled.
+The interface implements first-run setup, All/One-person selection, a read-only
+two-way preview, conflict decisions and an explicit Apply step. Close digiKam
+before applying local changes; the UI checks this on Linux and always requires
+confirmation. Preview runs, notifications, conflict decisions, operation
+results and face links are persisted in the application state database.
+
+Backups are stored under the application's configuration directory in
+`backups/`. On Linux this is normally
+`~/.config/digikam-memories-sync/backups/`.

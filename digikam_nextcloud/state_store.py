@@ -69,6 +69,26 @@ CREATE TABLE IF NOT EXISTS run_results (
     run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
     result_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS apply_runs (
+    run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    backup_path TEXT,
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS run_actions (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    target TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    action_json TEXT NOT NULL,
+    result_json TEXT,
+    error TEXT,
+    applied_at TEXT,
+    UNIQUE(run_id, position)
+);
+CREATE INDEX IF NOT EXISTS run_actions_status_idx ON run_actions(run_id, status, position);
 """
 
 
@@ -161,6 +181,171 @@ class StateStore:
             )
             self.conn.commit()
 
+    def initialize_apply(self, run_id: int, plan: list[dict[str, Any]]) -> None:
+        with self.lock:
+            existing = self.conn.execute(
+                "SELECT COUNT(*) FROM run_actions WHERE run_id = ?", (run_id,)
+            ).fetchone()[0]
+            if existing and int(existing) != len(plan):
+                raise ValueError("The saved Apply plan does not match this preview.")
+            if existing:
+                saved = self.conn.execute(
+                    "SELECT action_json FROM run_actions WHERE run_id = ? ORDER BY position",
+                    (run_id,),
+                ).fetchall()
+                if [json.loads(row[0]) for row in saved] != plan:
+                    raise ValueError("The saved Apply plan does not match this preview.")
+            if not existing:
+                self.conn.executemany(
+                    """INSERT INTO run_actions(run_id, position, target, operation, action_json)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    [
+                        (run_id, position, action["target"], action["operation"], json.dumps(action))
+                        for position, action in enumerate(plan)
+                    ],
+                )
+            self.conn.execute(
+                "INSERT OR IGNORE INTO apply_runs(run_id) VALUES (?)", (run_id,)
+            )
+            self.conn.execute(
+                """UPDATE run_actions SET status = 'pending', error = NULL
+                   WHERE run_id = ? AND status = 'failed'""",
+                (run_id,),
+            )
+            self.conn.execute(
+                "UPDATE runs SET status = 'applying', finished_at = NULL WHERE id = ?",
+                (run_id,),
+            )
+            self.conn.commit()
+
+    def set_apply_backup(self, run_id: int, path: str) -> None:
+        with self.lock:
+            self.conn.execute(
+                "UPDATE apply_runs SET backup_path = ? WHERE run_id = ?", (path, run_id)
+            )
+            self.conn.commit()
+
+    def apply_backup(self, run_id: int) -> str | None:
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT backup_path FROM apply_runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        return str(row[0]) if row is not None and row[0] else None
+
+    def pending_apply_actions(self, run_id: int) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT id, position, action_json FROM run_actions
+                   WHERE run_id = ? AND status = 'pending' ORDER BY position""",
+                (run_id,),
+            ).fetchall()
+        return [
+            {"id": int(row["id"]), "position": int(row["position"]), "action": json.loads(row["action_json"])}
+            for row in rows
+        ]
+
+    def finish_apply_action(
+        self, action_id: int, status: str, *, result: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        if status not in {"applied", "failed"}:
+            raise ValueError("Invalid action status.")
+        with self.lock:
+            self.conn.execute(
+                """UPDATE run_actions SET status = ?, result_json = ?, error = ?,
+                   applied_at = CASE WHEN ? = 'applied' THEN CURRENT_TIMESTAMP ELSE applied_at END
+                   WHERE id = ?""",
+                (status, json.dumps(result) if result is not None else None, error, status, action_id),
+            )
+            self.conn.commit()
+
+    def apply_counts(self, run_id: int) -> dict[str, int]:
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT status, target, COUNT(*) AS amount FROM run_actions
+                   WHERE run_id = ? GROUP BY status, target""",
+                (run_id,),
+            ).fetchall()
+        counts = {
+            "total": 0, "applied": 0, "failed": 0, "pending": 0,
+            "memories": 0, "digikam": 0,
+        }
+        for row in rows:
+            amount = int(row["amount"])
+            counts["total"] += amount
+            counts[str(row["status"])] += amount
+            counts[str(row["target"])] += amount
+        return counts
+
+    def apply_failures(self, run_id: int, limit: int = 10) -> list[dict[str, str]]:
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT action_json, error FROM run_actions
+                   WHERE run_id = ? AND status = 'failed'
+                   ORDER BY position LIMIT ?""",
+                (run_id, limit),
+            ).fetchall()
+        failures = []
+        for row in rows:
+            action = json.loads(row["action_json"])
+            failures.append(
+                {
+                    "path": str(action.get("path", "")),
+                    "operation": str(action.get("operation", "")),
+                    "error": str(row["error"] or "Unknown error"),
+                }
+            )
+        return failures
+
+    def finish_apply(self, run_id: int, status: str) -> dict[str, Any]:
+        counts = self.apply_counts(run_id)
+        with self.lock:
+            self.conn.execute(
+                "UPDATE runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (status, run_id),
+            )
+            self.conn.execute(
+                "UPDATE apply_runs SET finished_at = CURRENT_TIMESTAMP WHERE run_id = ?",
+                (run_id,),
+            )
+            self.conn.commit()
+        return {**counts, "backup_path": self.apply_backup(run_id)}
+
+    def save_face_link(self, link: dict[str, Any]) -> None:
+        values = (
+            int(link["digikam_image_id"]), int(link["digikam_tag_id"]),
+            int(link["nextcloud_file_id"]), int(link["nextcloud_detection_id"]),
+        )
+        with self.lock:
+            row = self.conn.execute(
+                """SELECT id FROM face_links WHERE profile_id = 1
+                   AND digikam_image_id = ? AND digikam_tag_id = ?
+                   AND nextcloud_file_id = ? AND nextcloud_detection_id = ?""",
+                values,
+            ).fetchone()
+            payload = (
+                str(link["digikam_name"]), str(link["nextcloud_name"]),
+                json.dumps(link["digikam_rect"]), json.dumps(link["nextcloud_rect"]),
+            )
+            if row is None:
+                self.conn.execute(
+                    """INSERT INTO face_links(
+                           profile_id, digikam_image_id, digikam_tag_id,
+                           nextcloud_file_id, nextcloud_detection_id,
+                           digikam_name, nextcloud_name, digikam_rect_json,
+                           nextcloud_rect_json, last_synced_at)
+                       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                    (*values, *payload),
+                )
+            else:
+                self.conn.execute(
+                    """UPDATE face_links SET digikam_name = ?, nextcloud_name = ?,
+                       digikam_rect_json = ?, nextcloud_rect_json = ?,
+                       last_synced_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                    (*payload, int(row[0])),
+                )
+            self.conn.commit()
+
     def save_conflicts(self, run_id: int, conflicts: list[dict[str, Any]]) -> None:
         with self.lock:
             self.conn.executemany(
@@ -217,11 +402,15 @@ class StateStore:
             raise ValueError("Choose either digiKam or Memories.")
         with self.lock:
             row = self.conn.execute(
-                "SELECT id FROM conflicts WHERE id = ? AND run_id = ?",
+                """SELECT c.id, r.status FROM conflicts c
+                   JOIN runs r ON r.id = c.run_id
+                   WHERE c.id = ? AND c.run_id = ?""",
                 (conflict_id, run_id),
             ).fetchone()
             if row is None:
                 raise ValueError("Conflict not found.")
+            if row["status"] not in {"previewing", "previewed"}:
+                raise ValueError("Conflict decisions cannot change after Apply has started.")
             self.conn.execute(
                 """UPDATE conflicts SET status = 'resolved', resolution = ?
                    WHERE id = ? AND run_id = ?""",
@@ -259,4 +448,10 @@ class StateStore:
         }
         raw_result = result.pop("result_json")
         result["result"] = json.loads(raw_result) if raw_result else None
+        counts = self.apply_counts(run_id)
+        result["apply"] = {
+            **counts,
+            "backup_path": self.apply_backup(run_id),
+            "errors": self.apply_failures(run_id),
+        } if counts["total"] or self.apply_backup(run_id) else None
         return result

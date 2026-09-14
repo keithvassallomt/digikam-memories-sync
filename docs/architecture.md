@@ -45,6 +45,20 @@ than silently choosing a winner.
 Automatic deletion propagation is outside the initial release. Missing records
 are reported for review.
 
+## Applying a preview
+
+Apply uses the action list saved by the preview together with the saved conflict
+decisions. It does not silently run a new comparison. Each target is read again
+immediately before it is changed; an unexpected name, rectangle or file ID is
+reported as stale rather than overwritten.
+
+Before local writes, Face Sync creates a consistent SQLite backup with the
+SQLite backup API, which includes committed WAL content. The UI requires the
+user to close digiKam and also detects a running digiKam process on Linux.
+Every operation is journalled separately. Completed operations are idempotent,
+so an interrupted run resumes with pending or failed entries and does not
+repeat completed changes.
+
 ## Notifications
 
 The service emits structured events independently of the UI. Events are stored
@@ -58,6 +72,8 @@ Initial event types are:
 - `run.no_changes`: both libraries already agree.
 - `conflicts.created`: for example, “12 conflicts need your attention.”
 - `run.failed`: connection, authentication or processing failure.
+- `apply.completed`: the approved changes were written to both libraries.
+- `apply.failed`: some approved changes failed or are waiting to resume.
 - `connection.action_required`: credentials or a required Nextcloud app need
   attention.
 

@@ -105,7 +105,7 @@
             <li><span>Warnings</span><strong id="result-warnings">0</strong></li>
           </ul>
         </section>
-        <div class="actions"><button id="preview-back-button" class="secondary" type="button">Back</button><button id="review-conflicts-button" class="primary" type="button" disabled>No conflicts to review</button></div>
+        <div class="actions"><button id="preview-back-button" class="secondary" type="button">Back</button><button id="review-conflicts-button" class="primary" type="button">Continue to Apply</button></div>
       </section>
 
       <section id="conflict-screen" class="screen">
@@ -139,7 +139,56 @@
           <h1>Conflicts resolved</h1>
           <p id="conflict-complete-message" class="lead"></p>
           <section class="card"><p class="completion-mark" aria-hidden="true">✓</p><h2>Your decisions are saved</h2><p>Nothing has been changed in digiKam or Memories yet.</p></section>
-          <div class="actions"><button id="conflict-complete-back" class="secondary" type="button">Back to preview</button><button id="review-decisions-button" class="secondary" type="button">Review decisions</button><button class="primary" type="button" disabled>Apply changes</button></div>
+          <div class="actions"><button id="conflict-complete-back" class="secondary" type="button">Back to preview</button><button id="review-decisions-button" class="secondary" type="button">Review decisions</button><button id="conflict-apply-button" class="primary" type="button">Continue to Apply</button></div>
+        </div>
+      </section>
+
+      <section id="apply-screen" class="screen">
+        <div id="apply-review">
+          <h1>Ready to apply</h1>
+          <p class="lead">Review the final totals, then apply the changes to both libraries.</p>
+          <div class="stats apply-stats">
+            <div class="stat"><strong id="apply-total">0</strong><span>Total face changes</span></div>
+            <div class="stat"><strong id="apply-memories">0</strong><span>Changes in Memories</span></div>
+            <div class="stat"><strong id="apply-digikam">0</strong><span>Changes in digiKam</span></div>
+            <div class="stat"><strong id="apply-conflicts">0</strong><span>Decisions included</span></div>
+          </div>
+          <section id="backup-card" class="card backup-card">
+            <div class="card-heading"><span class="card-icon" aria-hidden="true">✓</span><div><h2>A digiKam backup is created automatically</h2><p>Face Sync makes a consistent database backup before the first local change.</p></div></div>
+          </section>
+          <section id="close-digikam-card" class="card close-card">
+            <h2>Close digiKam before continuing</h2>
+            <p>digiKam must be closed while Face Sync updates its face database.</p>
+            <label class="confirmation"><input id="digikam-closed" type="checkbox"><span>I have closed digiKam</span></label>
+          </section>
+          <div id="apply-message" class="message" aria-live="polite"></div>
+          <div class="actions"><button id="apply-back-button" class="secondary" type="button">Back</button><button id="apply-button" class="primary" type="button">Apply changes</button></div>
+        </div>
+
+        <div id="apply-progress-view" hidden>
+          <h1>Applying changes</h1>
+          <p id="apply-phase" class="lead">Preparing both libraries…</p>
+          <section class="card scan-card">
+            <div class="progress-heading"><strong id="apply-percent">Preparing…</strong><span id="apply-count">0 changes completed</span></div>
+            <progress id="apply-progress" aria-label="Apply progress"></progress>
+            <div class="live-counts" aria-live="polite">
+              <span><strong id="apply-completed-count">0</strong> completed</span>
+              <span><strong id="apply-failed-count">0</strong> failed</span>
+            </div>
+          </section>
+          <div class="notice">You can leave this window open while Face Sync works.</div>
+        </div>
+
+        <div id="apply-complete" hidden>
+          <h1 id="apply-complete-heading">Changes applied</h1>
+          <p id="apply-complete-lead" class="lead"></p>
+          <section class="card">
+            <p id="apply-completion-mark" class="completion-mark" aria-hidden="true">✓</p>
+            <h2 id="apply-complete-summary"></h2>
+            <p id="apply-backup-path" class="backup-path"></p>
+            <ul id="apply-errors" class="apply-errors" hidden></ul>
+          </section>
+          <div class="actions"><button id="new-sync-button" class="secondary" type="button">Start another sync</button><button id="retry-apply-button" class="primary" type="button" hidden>Review and retry</button></div>
         </div>
       </section>
     </main>

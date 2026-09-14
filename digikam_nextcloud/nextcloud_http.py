@@ -747,6 +747,12 @@ class NextcloudHTTP:
         )
         return matches, unmatched, faces_by_file
 
+    def resolve_file_with_faces(
+        self, webdav_path: str
+    ) -> tuple[Optional[NextcloudFile], list[FaceRegion]]:
+        """Resolve one current file and its current Recognize detections."""
+        return self._propfind_file_with_faces(webdav_path)
+
     def ensure_people(self, names: Iterable[str]) -> None:
         """Create missing person clusters (MKCOL) concurrently."""
         # One probe first — avoids 5000× failures if API key is missing

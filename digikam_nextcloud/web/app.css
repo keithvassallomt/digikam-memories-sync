@@ -109,13 +109,22 @@ progress { accent-color: var(--brand); display: block; height: 18px; width: 100%
 .apply-all input { flex: 0 0 auto; margin: 3px 0 0; min-height: auto; width: auto; }
 .apply-all strong, .apply-all small { display: block; }
 .completion-mark { color: var(--good); font-size: 34px; margin-bottom: 8px; }
+.apply-stats { grid-template-columns: repeat(4, 1fr); }
+.backup-card .card-heading { margin-bottom: 0; }
+.close-card p { color: var(--muted); margin: 7px 0 14px; }
+.confirmation { align-items: center; color: var(--ink); display: flex; font-size: 15px; gap: 10px; }
+.confirmation input { flex: 0 0 auto; margin: 0; min-height: auto; width: auto; }
+.backup-path { color: var(--muted); font-size: 12px; margin: 10px 0 0; overflow-wrap: anywhere; }
+.completion-mark.failed { color: var(--bad); }
+.apply-errors { color: var(--bad); font-size: 13px; margin: 15px 0 0; padding-left: 20px; }
+.apply-errors li { margin-top: 7px; overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
 @media (max-width: 720px) {
   .shell { display: block; }
   .steps { border-bottom: 1px solid var(--line); border-right: 0; display: flex; overflow-x: auto; padding: 8px; }
   .step { flex: 0 0 auto; font-size: 0; margin: 0; }
   main { padding: 24px 14px; }
-  .fields, .scope-options, .stats { grid-template-columns: 1fr 1fr; }
+  .fields, .scope-options, .stats, .apply-stats { grid-template-columns: 1fr 1fr; }
   .conflict-grid { grid-template-columns: 1fr; }
   label.wide { grid-column: auto; }
   .field-action { align-items: stretch; flex-direction: column; }

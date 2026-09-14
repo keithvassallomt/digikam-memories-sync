@@ -146,6 +146,8 @@ def compare_memories_to_digikam(
                             nc_file_id=memories_face.nc_file_id,
                             nc_detection_id=memories_face.nc_detection_id,
                             nc_cluster_id=memories_face.nc_cluster_id,
+                            digikam_image_id=image.image_id,
+                            nc_file_name=memories_face.file_name,
                         )
                     )
 

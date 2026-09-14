@@ -60,6 +60,8 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 run_id = int(parts[2])
                 if len(parts) == 3:
                     self._json(HTTPStatus.OK, self.server.app.preview_status(run_id))
+                elif len(parts) == 4 and parts[3] == "apply":
+                    self._json(HTTPStatus.OK, self.server.app.apply_review(run_id))
                 elif len(parts) == 4 and parts[3] == "conflicts":
                     self._json(HTTPStatus.OK, self.server.app.conflicts(run_id))
                 elif (
@@ -98,15 +100,20 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.ACCEPTED, self.server.app.start_preview(payload))
             elif path.startswith("/api/runs/"):
                 parts = path.strip("/").split("/")
-                if len(parts) != 5 or parts[3] != "conflicts":
+                if len(parts) == 4 and parts[3] == "apply":
+                    self._json(
+                        HTTPStatus.ACCEPTED,
+                        self.server.app.start_apply(int(parts[2]), payload),
+                    )
+                elif len(parts) == 5 and parts[3] == "conflicts":
+                    self._json(
+                        HTTPStatus.OK,
+                        self.server.app.resolve_conflict(
+                            int(parts[2]), int(parts[4]), payload
+                        ),
+                    )
+                else:
                     self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
-                    return
-                self._json(
-                    HTTPStatus.OK,
-                    self.server.app.resolve_conflict(
-                        int(parts[2]), int(parts[4]), payload
-                    ),
-                )
             else:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
         except RecognizeNotInstalledError as error:

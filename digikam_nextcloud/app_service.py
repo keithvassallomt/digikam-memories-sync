@@ -6,11 +6,14 @@ import sqlite3
 import threading
 import logging
 import mimetypes
+from datetime import datetime
 from contextlib import closing
 from pathlib import Path
 from typing import Any, Callable
 
 from .digikam import DigikamDB
+from .digikam_writer import DigikamWriter, create_sqlite_backup, digikam_is_running
+from .apply import ApplyExecutor, build_apply_plan, plan_summary
 from .nextcloud_http import NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
 from .settings import SettingsStore
@@ -189,6 +192,160 @@ class AppService:
     def conflicts(self, run_id: int) -> dict[str, Any]:
         return self.state.conflicts_for_run(run_id)
 
+    def apply_review(self, run_id: int) -> dict[str, Any]:
+        run = self.state.run(run_id)
+        if run is None or run.get("result") is None:
+            raise ValueError("Preview run not found.")
+        if run["status"] not in {"previewed", "applying", "apply_failed", "applied"}:
+            raise ValueError("This preview is not ready to apply.")
+        conflicts = self.state.conflicts_for_run(run_id)
+        plan = build_apply_plan(run["result"], conflicts)
+        return {
+            "run_id": run_id,
+            **plan_summary(plan),
+            "conflicts": conflicts["total"],
+            "digikam_running": digikam_is_running(),
+            "requires_digikam_closed": any(item["target"] == "digikam" for item in plan),
+            "status": run["status"],
+            "apply": run.get("apply"),
+        }
+
+    def start_apply(self, run_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        review = self.apply_review(run_id)
+        if review["status"] == "applied":
+            return self.preview_status(run_id)
+        if review["requires_digikam_closed"]:
+            if payload.get("digikam_closed") is not True:
+                raise ValueError("Confirm that digiKam is closed before applying changes.")
+            if digikam_is_running():
+                raise ValueError("digiKam is still running. Close it, then try Apply again.")
+        run = self.state.run(run_id)
+        assert run is not None and run["result"] is not None
+        plan = build_apply_plan(run["result"], self.state.conflicts_for_run(run_id))
+        with self._job_lock:
+            active = [job_id for job_id, thread in self._jobs.items() if thread.is_alive()]
+            if active:
+                raise ValueError("Another Face Sync job is already running.")
+            self.state.initialize_apply(run_id, plan)
+            self.state.update_progress(run_id, "starting_apply", 0, len(plan), plan_summary(plan))
+            thread = threading.Thread(
+                target=self._apply_job,
+                args=(run_id,),
+                name=f"face-sync-apply-{run_id}",
+                daemon=True,
+            )
+            self._jobs[run_id] = thread
+            thread.start()
+        return {"run_id": run_id, "status": "applying"}
+
+    def _apply_job(self, run_id: int) -> None:
+        backend = None
+        writer = None
+        try:
+            settings = self.settings.load()
+            database = str(settings.get("digikam_db") or "")
+            if not database:
+                raise ValueError("The saved digiKam database is unavailable.")
+            pending = self.state.pending_apply_actions(run_id)
+            counts = self.state.apply_counts(run_id)
+            if any(item["action"]["target"] == "digikam" for item in pending):
+                backup = self.state.apply_backup(run_id)
+                if not backup:
+                    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    destination = self.settings.root / "backups" / f"digikam4-run-{run_id}-{timestamp}.db"
+                    self.state.update_progress(run_id, "backing_up_digikam", counts["applied"], counts["total"], counts)
+                    backup = str(create_sqlite_backup(database, destination))
+                    self.state.set_apply_backup(run_id, backup)
+
+            if any(item["action"]["target"] == "memories" for item in pending):
+                user_id = str(settings["nc_user"])
+                password = self.settings.password(user_id)
+                if not password:
+                    raise ValueError("The saved Nextcloud app password is unavailable.")
+                backend = self.backend_factory(
+                    str(settings["nextcloud_url"]), user_id, password, http_workers=4
+                )
+                requirements = backend.connection_requirements()
+                if not requirements.ready:
+                    raise ValueError("Nextcloud Recognize or the Face Sync companion app is unavailable.")
+
+            writer = DigikamWriter(database)
+            executor = ApplyExecutor(
+                backend=backend,
+                digikam=writer,
+                nextcloud_photos_path=str(settings.get("nc_photos_path", "Photos")),
+            )
+            consecutive_failures = 0
+            for item in pending:
+                action = item["action"]
+                try:
+                    outcome = executor.execute(action)
+                    self.state.finish_apply_action(item["id"], "applied", result=outcome)
+                    link = executor.link_for(action, outcome)
+                    if link is not None:
+                        self.state.save_face_link(link)
+                    consecutive_failures = 0
+                except Exception as error:
+                    LOG.exception("Apply action %s failed", item["id"])
+                    self.state.finish_apply_action(item["id"], "failed", error=str(error))
+                    consecutive_failures += 1
+                counts = self.state.apply_counts(run_id)
+                self.state.update_progress(
+                    run_id,
+                    "applying",
+                    counts["applied"] + counts["failed"],
+                    counts["total"],
+                    counts,
+                )
+                if consecutive_failures >= 3:
+                    break
+
+            counts = self.state.apply_counts(run_id)
+            final_status = "applied" if not counts["failed"] and not counts["pending"] else "apply_failed"
+            final = self.state.finish_apply(run_id, final_status)
+            self.state.update_progress(
+                run_id,
+                "completed" if final_status == "applied" else "apply_failed",
+                final["applied"] + final["failed"],
+                final["total"],
+                final,
+                error=None if final_status == "applied" else "Some changes could not be applied.",
+            )
+            if final_status == "applied":
+                self.state.create_notification(
+                    "apply.completed",
+                    f"Updated {final['applied']} faces",
+                    f"{final['memories']} Memories changes and {final['digikam']} digiKam changes completed.",
+                    f"/runs/{run_id}",
+                    run_id=run_id,
+                )
+            else:
+                self.state.create_notification(
+                    "apply.failed",
+                    f"{final['failed'] + final['pending']} changes need attention",
+                    "Open Face Sync to retry the changes that did not finish.",
+                    f"/runs/{run_id}",
+                    run_id=run_id,
+                )
+        except Exception as error:
+            LOG.exception("Apply %s failed", run_id)
+            final = self.state.finish_apply(run_id, "apply_failed")
+            self.state.update_progress(
+                run_id, "apply_failed", final["applied"] + final["failed"],
+                final["total"], final, error=str(error),
+            )
+            self.state.create_notification(
+                "apply.failed", "Apply failed", "Open Face Sync for details.",
+                f"/runs/{run_id}", run_id=run_id,
+            )
+        finally:
+            if writer is not None:
+                writer.close()
+            if backend is not None:
+                backend.close()
+            with self._job_lock:
+                self._jobs.pop(run_id, None)
+
     def resolve_conflict(
         self, run_id: int, conflict_id: int, payload: dict[str, Any]
     ) -> dict[str, Any]:
@@ -301,7 +458,7 @@ class AppService:
                     insert_missing=True,
                     prefer_digikam_on_conflict=False,
                     batch_size=250,
-                    max_actions=5000,
+                    max_actions=250000,
                     session=None,
                     progress_callback=forward_progress,
                 )
@@ -310,7 +467,7 @@ class AppService:
                     selected_faces,
                     report,
                     batch_size=250,
-                    max_actions=5000,
+                    max_actions=250000,
                     progress_callback=lambda progress: self.state.update_progress(
                         run_id,
                         "scanning_memories",

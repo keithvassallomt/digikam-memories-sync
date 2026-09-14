@@ -8,6 +8,7 @@ let currentConflicts = [];
 let currentConflictIndex = 0;
 let conflictPhotoUrl = null;
 let conflictPhotoRequest = 0;
+let currentApplyReview = null;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -143,6 +144,7 @@ async function loadPeople() {
 function showPreview(result) {
   const summary = result.summary;
   currentRunId = result.run_id;
+  currentConflicts = [];
   document.getElementById('preview-heading').textContent = result.person ? `Preview for ${result.person}` : 'Preview for all faces';
   document.getElementById('stat-correct').textContent = summary.skipped.toLocaleString();
   document.getElementById('stat-memories').textContent = (summary.assigned + summary.inserted).toLocaleString();
@@ -158,10 +160,10 @@ function showPreview(result) {
   document.getElementById('result-create-digikam').textContent = summary.created_in_digikam.toLocaleString();
   document.getElementById('result-warnings').textContent = result.warnings.length.toLocaleString();
   const reviewButton = document.getElementById('review-conflicts-button');
-  reviewButton.disabled = summary.conflicts === 0;
+  reviewButton.disabled = false;
   reviewButton.textContent = summary.conflicts
     ? `Review ${summary.conflicts.toLocaleString()} conflicts`
-    : 'No conflicts to review';
+    : 'Continue to Apply';
   document.getElementById('scope-screen').classList.remove('active');
   document.getElementById('scan-screen').classList.remove('active');
   document.getElementById('preview-screen').classList.add('active');
@@ -462,7 +464,11 @@ document.getElementById('review-conflicts-button').addEventListener('click', asy
   const originalText = button.textContent;
   button.textContent = 'Opening conflicts…';
   try {
-    await openConflictScreen();
+    if (currentConflicts.length || Number(document.getElementById('stat-conflicts').textContent.replaceAll(',', '')) > 0) {
+      await openConflictScreen();
+    } else {
+      await openApplyReview();
+    }
   } catch (error) {
     button.textContent = error.message;
   } finally {
@@ -481,6 +487,164 @@ document.getElementById('conflict-back-button').addEventListener('click', () => 
 
 document.getElementById('conflict-complete-back').addEventListener('click', returnToPreview);
 document.getElementById('review-decisions-button').addEventListener('click', () => showConflict(0));
+document.getElementById('conflict-apply-button').addEventListener('click', openApplyReview);
+
+function setApplyView(view) {
+  document.getElementById('apply-review').hidden = view !== 'review';
+  document.getElementById('apply-progress-view').hidden = view !== 'progress';
+  document.getElementById('apply-complete').hidden = view !== 'complete';
+}
+
+function updateApplyButton() {
+  const button = document.getElementById('apply-button');
+  const confirmed = document.getElementById('digikam-closed').checked;
+  button.disabled = Boolean(currentApplyReview?.requires_digikam_closed && !confirmed);
+}
+
+async function openApplyReview() {
+  const review = await api(`/api/runs/${currentRunId}/apply`);
+  currentApplyReview = review;
+  document.querySelectorAll('.screen').forEach((screen) => screen.classList.remove('active'));
+  document.getElementById('apply-screen').classList.add('active');
+  steps.forEach((step, index) => {
+    step.classList.toggle('done', index < 4);
+    step.classList.toggle('current', index === 4);
+  });
+  setApplyView('review');
+  document.getElementById('apply-total').textContent = review.total.toLocaleString();
+  document.getElementById('apply-memories').textContent = review.memories.toLocaleString();
+  document.getElementById('apply-digikam').textContent = review.digikam.toLocaleString();
+  document.getElementById('apply-conflicts').textContent = review.conflicts.toLocaleString();
+  const closeCard = document.getElementById('close-digikam-card');
+  closeCard.hidden = !review.requires_digikam_closed;
+  document.getElementById('backup-card').hidden = !review.requires_digikam_closed;
+  document.getElementById('digikam-closed').checked = false;
+  const applyMessage = document.getElementById('apply-message');
+  applyMessage.className = review.digikam_running ? 'message error' : 'message';
+  applyMessage.textContent = review.digikam_running
+    ? 'digiKam is currently running. Close it before you click Apply.'
+    : '';
+  const button = document.getElementById('apply-button');
+  button.textContent = review.total === 1 ? 'Apply 1 change' : `Apply ${review.total.toLocaleString()} changes`;
+  updateApplyButton();
+}
+
+document.getElementById('digikam-closed').addEventListener('change', updateApplyButton);
+
+document.getElementById('apply-back-button').addEventListener('click', () => {
+  document.getElementById('apply-screen').classList.remove('active');
+  document.getElementById('preview-screen').classList.add('active');
+  steps[4].classList.remove('current');
+  steps[3].classList.remove('done');
+  steps[2].classList.remove('done');
+  steps[2].classList.add('current');
+});
+
+function showApplyProgress() {
+  setApplyView('progress');
+  const progress = document.getElementById('apply-progress');
+  progress.removeAttribute('value');
+  progress.removeAttribute('max');
+  document.getElementById('apply-phase').textContent = 'Preparing both libraries…';
+  document.getElementById('apply-percent').textContent = 'Preparing…';
+  document.getElementById('apply-count').textContent = '0 changes completed';
+  document.getElementById('apply-completed-count').textContent = '0';
+  document.getElementById('apply-failed-count').textContent = '0';
+}
+
+function updateApplyProgress(status) {
+  const data = status.progress || {};
+  const progress = document.getElementById('apply-progress');
+  const total = data.total || status.apply?.total || 0;
+  const completed = data.applied || status.apply?.applied || 0;
+  const failed = data.failed || status.apply?.failed || 0;
+  if (total > 0) {
+    progress.max = total;
+    progress.value = Math.min(completed + failed, total);
+    document.getElementById('apply-percent').textContent = `${Math.floor(100 * (completed + failed) / total)}%`;
+    document.getElementById('apply-count').textContent = `${(completed + failed).toLocaleString()} of ${total.toLocaleString()} changes checked`;
+  }
+  document.getElementById('apply-completed-count').textContent = completed.toLocaleString();
+  document.getElementById('apply-failed-count').textContent = failed.toLocaleString();
+  document.getElementById('apply-phase').textContent = data.phase === 'backing_up_digikam'
+    ? 'Backing up the digiKam database…'
+    : 'Updating face names and boxes…';
+}
+
+function showApplyComplete(status) {
+  setApplyView('complete');
+  const applied = status.apply?.applied || 0;
+  const failed = status.apply?.failed || 0;
+  const pending = status.apply?.pending || 0;
+  const successful = status.status === 'applied';
+  document.getElementById('apply-complete-heading').textContent = successful ? 'Changes applied' : 'Some changes need attention';
+  document.getElementById('apply-complete-lead').textContent = successful
+    ? 'Both libraries now contain the approved face changes.'
+    : `${failed + pending} changes did not finish. The completed changes are saved and will not be repeated.`;
+  document.getElementById('apply-complete-summary').textContent = successful
+    ? `${applied.toLocaleString()} face changes completed`
+    : `${applied.toLocaleString()} completed · ${failed.toLocaleString()} failed · ${pending.toLocaleString()} waiting`;
+  const mark = document.getElementById('apply-completion-mark');
+  mark.textContent = successful ? '✓' : '!';
+  mark.classList.toggle('failed', !successful);
+  const backup = status.apply?.backup_path;
+  document.getElementById('apply-backup-path').textContent = backup ? `digiKam backup: ${backup}` : '';
+  const errors = document.getElementById('apply-errors');
+  errors.replaceChildren();
+  (status.apply?.errors || []).forEach((failure) => {
+    const item = document.createElement('li');
+    item.textContent = `${failure.path}: ${failure.error}`;
+    errors.appendChild(item);
+  });
+  errors.hidden = errors.children.length === 0;
+  document.getElementById('retry-apply-button').hidden = successful;
+}
+
+async function waitForApply(runId) {
+  while (true) {
+    const status = await api(`/api/runs/${runId}`);
+    updateApplyProgress(status);
+    if (status.status === 'applied' || status.status === 'apply_failed') {
+      showApplyComplete(status);
+      return;
+    }
+    await wait(750);
+  }
+}
+
+document.getElementById('apply-button').addEventListener('click', async () => {
+  const button = document.getElementById('apply-button');
+  const applyMessage = document.getElementById('apply-message');
+  button.disabled = true;
+  applyMessage.textContent = '';
+  applyMessage.className = 'message';
+  try {
+    await api(`/api/runs/${currentRunId}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ digikam_closed: document.getElementById('digikam-closed').checked }),
+    });
+    showApplyProgress();
+    await waitForApply(currentRunId);
+  } catch (error) {
+    applyMessage.textContent = error.message;
+    applyMessage.className = 'message error';
+    updateApplyButton();
+  }
+});
+
+document.getElementById('retry-apply-button').addEventListener('click', openApplyReview);
+
+document.getElementById('new-sync-button').addEventListener('click', () => {
+  currentRunId = null;
+  currentConflicts = [];
+  currentApplyReview = null;
+  document.getElementById('apply-screen').classList.remove('active');
+  document.getElementById('scope-screen').classList.add('active');
+  steps.forEach((step, index) => {
+    step.classList.toggle('done', index === 0);
+    step.classList.toggle('current', index === 1);
+  });
+});
 
 async function loadSettings() {
   const settings = await api('/api/settings');

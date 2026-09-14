@@ -123,6 +123,10 @@ def _process_match(
                     nc_file_id=m.nextcloud.file_id,
                     nc_detection_id=nf.nc_detection_id,
                     nc_cluster_id=nf.nc_cluster_id,
+                    digikam_image_id=df.digikam_image_id,
+                    digikam_tag_id=df.digikam_tag_id,
+                    nc_dav_parent=nf.dav_parent,
+                    nc_file_name=nf.file_name,
                 ),
                 max_actions=max_actions,
             )
@@ -138,6 +142,8 @@ def _process_match(
                 iou=iou,
                 nc_detection_id=nf.nc_detection_id,
                 nc_file_id=m.nextcloud.file_id,
+                digikam_image_id=df.digikam_image_id,
+                digikam_tag_id=df.digikam_tag_id,
             )
             _record_conflict(report, conflict, max_conflicts=max_conflicts)
             if not prefer_digikam_on_conflict:
@@ -154,6 +160,10 @@ def _process_match(
                         ),
                         nc_file_id=m.nextcloud.file_id,
                         nc_detection_id=nf.nc_detection_id,
+                        digikam_image_id=df.digikam_image_id,
+                        digikam_tag_id=df.digikam_tag_id,
+                        nc_dav_parent=nf.dav_parent,
+                        nc_file_name=nf.file_name,
                     ),
                     max_actions=max_actions,
                 )
@@ -205,6 +215,10 @@ def _process_match(
                 nc_file_id=m.nextcloud.file_id,
                 nc_detection_id=nf.nc_detection_id,
                 nc_cluster_id=cluster_id if cluster_id > 0 else None,
+                digikam_image_id=df.digikam_image_id,
+                digikam_tag_id=df.digikam_tag_id,
+                nc_dav_parent=nf.dav_parent,
+                nc_file_name=nf.file_name,
             ),
             max_actions=max_actions,
         )
@@ -262,6 +276,9 @@ def _process_match(
                 nc_file_id=m.nextcloud.file_id,
                 nc_detection_id=det_id,
                 nc_cluster_id=cluster_id if cluster_id > 0 else None,
+                digikam_image_id=df.digikam_image_id,
+                digikam_tag_id=df.digikam_tag_id,
+                nc_file_name=m.nextcloud.name,
             ),
             max_actions=max_actions,
         )
