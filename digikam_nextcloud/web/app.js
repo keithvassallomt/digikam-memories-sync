@@ -6,7 +6,6 @@ const steps = document.querySelectorAll('.step');
 let currentRunId = null;
 let currentConflicts = [];
 let currentConflictIndex = 0;
-let selectedResolution = null;
 let conflictPhotoUrl = null;
 let conflictPhotoRequest = 0;
 
@@ -171,7 +170,7 @@ function showPreview(result) {
   steps[2].classList.add('current');
 }
 
-function conflictCrop(rectangles) {
+function conflictCrop(rectangles, imageWidth, imageHeight, targetAspect = 4 / 3) {
   const left = Math.min(...rectangles.map((rect) => rect[0]));
   const top = Math.min(...rectangles.map((rect) => rect[1]));
   const right = Math.max(...rectangles.map((rect) => rect[0] + rect[2]));
@@ -181,11 +180,19 @@ function conflictCrop(rectangles) {
   const faceWidth = Math.max(0.01, right - left);
   const faceHeight = Math.max(0.01, bottom - top);
   const padding = Math.max(0.04, Math.max(faceWidth, faceHeight) * 0.7);
-  let width = Math.min(1, Math.max(0.18, faceWidth + 2 * padding));
-  let height = Math.min(1, Math.max(0.135, faceHeight + 2 * padding));
-  const targetAspect = 4 / 3;
-  if (width / height < targetAspect) width = Math.min(1, height * targetAspect);
-  else height = Math.min(1, width / targetAspect);
+  let width = Math.max(0.18, faceWidth + 2 * padding);
+  let height = Math.max(0.135, faceHeight + 2 * padding);
+  const normalizedAspect = targetAspect * imageHeight / imageWidth;
+  if (width / height < normalizedAspect) width = height * normalizedAspect;
+  else height = width / normalizedAspect;
+  if (width > 1) {
+    width = 1;
+    height = 1 / normalizedAspect;
+  }
+  if (height > 1) {
+    height = 1;
+    width = normalizedAspect;
+  }
   const x = Math.max(0, Math.min(1 - width, centreX - width / 2));
   const y = Math.max(0, Math.min(1 - height, centreY - height / 2));
   return { x, y, width, height };
@@ -199,11 +206,43 @@ function placeFaceBox(element, rect, crop) {
   element.hidden = false;
 }
 
-function chooseResolution(resolution) {
-  selectedResolution = resolution;
+function showSelectedResolution(resolution) {
   document.getElementById('keep-digikam-button').setAttribute('aria-pressed', String(resolution === 'digikam'));
   document.getElementById('keep-memories-button').setAttribute('aria-pressed', String(resolution === 'memories'));
-  document.getElementById('save-conflict-button').disabled = false;
+}
+
+async function resolveCurrentConflict(resolution) {
+  const digikamButton = document.getElementById('keep-digikam-button');
+  const memoriesButton = document.getElementById('keep-memories-button');
+  if (digikamButton.disabled || memoriesButton.disabled) return;
+  const conflict = currentConflicts[currentConflictIndex];
+  const applyToRemaining = document.getElementById('apply-all-conflicts').checked;
+  const conflictMessage = document.getElementById('conflict-message');
+  showSelectedResolution(resolution);
+  digikamButton.disabled = true;
+  memoriesButton.disabled = true;
+  conflictMessage.textContent = 'Saving choice…';
+  conflictMessage.className = 'message';
+  try {
+    const result = await api(`/api/runs/${currentRunId}/conflicts/${conflict.id}`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution, apply_to_remaining: applyToRemaining }),
+    });
+    currentConflicts = result.conflicts;
+    const laterOpen = currentConflicts.findIndex(
+      (item, index) => index > currentConflictIndex && item.status !== 'resolved',
+    );
+    const nextOpen = laterOpen >= 0
+      ? laterOpen
+      : currentConflicts.findIndex((item) => item.status !== 'resolved');
+    if (nextOpen === -1) showConflictComplete();
+    else showConflict(nextOpen);
+  } catch (error) {
+    conflictMessage.textContent = error.message;
+    conflictMessage.className = 'message error';
+    digikamButton.disabled = false;
+    memoriesButton.disabled = false;
+  }
 }
 
 async function loadConflictPhoto(conflict) {
@@ -228,7 +267,12 @@ async function loadConflictPhoto(conflict) {
     conflictPhotoUrl = URL.createObjectURL(blob);
     image.onload = () => {
       if (requestNumber !== conflictPhotoRequest) return;
-      const crop = conflictCrop([conflict.digikam_rect, conflict.nextcloud_rect]);
+      const crop = conflictCrop(
+        [conflict.digikam_rect, conflict.nextcloud_rect],
+        image.naturalWidth,
+        image.naturalHeight,
+        canvas.width / canvas.height,
+      );
       const context = canvas.getContext('2d');
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(
@@ -263,12 +307,11 @@ async function loadConflictPhoto(conflict) {
 function showConflict(index) {
   currentConflictIndex = index;
   const conflict = currentConflicts[index];
-  selectedResolution = null;
   document.getElementById('conflict-review').hidden = false;
   document.getElementById('conflict-complete').hidden = true;
   document.getElementById('conflict-position').textContent = `${index + 1} / ${currentConflicts.length}`;
   const remaining = currentConflicts.filter((item) => item.status !== 'resolved').length;
-  document.getElementById('conflict-lead').textContent = `Conflict ${index + 1} of ${currentConflicts.length} · ${remaining} remaining`;
+  document.getElementById('conflict-lead').textContent = `Conflict ${index + 1} of ${currentConflicts.length} · ${remaining} remaining · click a name to continue`;
   document.getElementById('conflict-path').textContent = conflict.path;
   document.getElementById('conflict-overlap').textContent = `The two face boxes overlap ${Math.round(100 * conflict.iou)}%.`;
   document.getElementById('digikam-choice-name').textContent = conflict.digikam_person || 'Unnamed';
@@ -281,11 +324,12 @@ function showConflict(index) {
   );
   document.getElementById('keep-digikam-button').setAttribute('aria-pressed', 'false');
   document.getElementById('keep-memories-button').setAttribute('aria-pressed', 'false');
-  document.getElementById('save-conflict-button').disabled = true;
+  document.getElementById('keep-digikam-button').disabled = false;
+  document.getElementById('keep-memories-button').disabled = false;
   document.getElementById('apply-all-conflicts').checked = false;
   document.getElementById('conflict-message').textContent = '';
   document.getElementById('conflict-message').className = 'message';
-  if (conflict.resolution) chooseResolution(conflict.resolution);
+  if (conflict.resolution) showSelectedResolution(conflict.resolution);
   loadConflictPhoto(conflict);
 }
 
@@ -427,37 +471,8 @@ document.getElementById('review-conflicts-button').addEventListener('click', asy
   }
 });
 
-document.getElementById('keep-digikam-button').addEventListener('click', () => chooseResolution('digikam'));
-document.getElementById('keep-memories-button').addEventListener('click', () => chooseResolution('memories'));
-
-document.getElementById('save-conflict-button').addEventListener('click', async (event) => {
-  if (!selectedResolution) return;
-  const button = event.currentTarget;
-  const conflict = currentConflicts[currentConflictIndex];
-  const applyToRemaining = document.getElementById('apply-all-conflicts').checked;
-  button.disabled = true;
-  button.textContent = 'Saving…';
-  try {
-    const result = await api(`/api/runs/${currentRunId}/conflicts/${conflict.id}`, {
-      method: 'POST',
-      body: JSON.stringify({ resolution: selectedResolution, apply_to_remaining: applyToRemaining }),
-    });
-    currentConflicts = result.conflicts;
-    const laterOpen = currentConflicts.findIndex((item, index) => index > currentConflictIndex && item.status !== 'resolved');
-    const nextOpen = laterOpen >= 0
-      ? laterOpen
-      : currentConflicts.findIndex((item) => item.status !== 'resolved');
-    if (nextOpen === -1) showConflictComplete();
-    else showConflict(nextOpen);
-  } catch (error) {
-    const conflictMessage = document.getElementById('conflict-message');
-    conflictMessage.textContent = error.message;
-    conflictMessage.className = 'message error';
-    button.disabled = false;
-  } finally {
-    button.textContent = 'Save choice and continue';
-  }
-});
+document.getElementById('keep-digikam-button').addEventListener('click', () => resolveCurrentConflict('digikam'));
+document.getElementById('keep-memories-button').addEventListener('click', () => resolveCurrentConflict('memories'));
 
 document.getElementById('conflict-back-button').addEventListener('click', () => {
   if (currentConflictIndex > 0) showConflict(currentConflictIndex - 1);
