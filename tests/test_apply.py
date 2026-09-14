@@ -393,6 +393,25 @@ class ApplyServiceTests(unittest.TestCase):
             finally:
                 state.close()
 
+    def test_running_preview_is_restored_instead_of_an_older_result(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = StateStore(Path(temp) / "state.sqlite3")
+            try:
+                older = state.create_run("person")
+                state.save_result(
+                    older,
+                    {"run_id": older, "summary": {}, "actions": []},
+                )
+                running = state.create_run("person")
+
+                latest = state.latest_actionable_run()
+
+                self.assertEqual(latest["id"], running)
+                self.assertEqual(latest["status"], "previewing")
+                self.assertIsNone(latest["result"])
+            finally:
+                state.close()
+
     def test_background_apply_backs_up_writes_and_journals(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -169,7 +169,7 @@ class StateStore:
         with self.lock:
             row = self.conn.execute(
                 """SELECT id FROM runs
-                   WHERE status IN ('previewed', 'applying', 'apply_failed')
+                   WHERE status IN ('previewing', 'previewed', 'applying', 'apply_failed')
                    ORDER BY id DESC LIMIT 1"""
             ).fetchone()
         return self.run(int(row[0])) if row is not None else None

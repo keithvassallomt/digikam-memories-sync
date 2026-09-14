@@ -51,6 +51,11 @@ function showMessage(text, kind = '') {
   message.className = `message ${kind}`;
 }
 
+function activateScreen(screenId) {
+  document.querySelectorAll('.screen').forEach((screen) => screen.classList.remove('active'));
+  document.getElementById(screenId).classList.add('active');
+}
+
 function setBusy(busy) {
   document.getElementById('test-button').disabled = busy;
   document.getElementById('save-button').disabled = busy;
@@ -171,9 +176,7 @@ function showPreview(result) {
   reviewButton.textContent = summary.conflicts
     ? `Review ${summary.conflicts.toLocaleString()} conflicts`
     : 'Continue to Apply';
-  document.getElementById('scope-screen').classList.remove('active');
-  document.getElementById('scan-screen').classList.remove('active');
-  document.getElementById('preview-screen').classList.add('active');
+  activateScreen('preview-screen');
   steps[1].classList.add('done');
   steps[1].classList.remove('current');
   steps[2].classList.add('current');
@@ -373,8 +376,7 @@ function returnToPreview() {
 }
 
 function showScan() {
-  document.getElementById('scope-screen').classList.remove('active');
-  document.getElementById('scan-screen').classList.add('active');
+  activateScreen('scan-screen');
   steps[1].classList.add('done');
   steps[1].classList.remove('current');
   steps[2].classList.add('current');
@@ -899,9 +901,14 @@ async function loadSettings() {
     document.querySelector('.connection').classList.add('ready');
     document.getElementById('connection-label').textContent = `Connected as ${settings.nc_user}`;
     const latest = await api('/api/runs/latest');
-    if (latest.run?.result) {
+    if (latest.run) {
       currentRunId = latest.run.id;
-      if (latest.run.status === 'previewed') {
+      if (latest.run.status === 'previewing') {
+        showScan();
+        waitForPreview(currentRunId).catch((error) => {
+          document.getElementById('scan-phase').textContent = error.message;
+        });
+      } else if (latest.run.status === 'previewed' && latest.run.result) {
         showPreview(latest.run.result);
       } else if (latest.run.status === 'apply_failed') {
         document.getElementById('connect-screen').classList.remove('active');
