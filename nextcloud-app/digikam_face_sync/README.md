@@ -8,6 +8,7 @@ The app adds these authenticated endpoints:
 ```text
 GET  /index.php/apps/digikam_face_sync/api/v1/face-import
 POST /index.php/apps/digikam_face_sync/api/v1/face-import
+POST /index.php/apps/digikam_face_sync/api/v1/face-assign
 GET  /index.php/apps/digikam_face_sync/api/v1/people
 GET  /index.php/apps/digikam_face_sync/api/v1/faces
 ```
@@ -22,6 +23,10 @@ use cursor pagination. The POST request verifies file access, rejects overlappin
 generates a real descriptor with Recognize's locally installed model, and then
 writes the detection into Recognize's existing tables. Retrying an identical
 request returns the existing detection.
+
+The assignment endpoint verifies that both the image and detection belong to
+the signed-in user before assigning an existing detection to a named person.
+It also handles unclustered detections, which have no WebDAV source folder.
 
 ## Install
 

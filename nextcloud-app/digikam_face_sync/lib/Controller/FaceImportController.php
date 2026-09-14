@@ -55,4 +55,25 @@ final class FaceImportController extends Controller {
 			return new JSONResponse(['error' => 'Face import failed'], Http::STATUS_INTERNAL_SERVER_ERROR);
 		}
 	}
+
+	#[NoAdminRequired]
+	public function assign(int $fileId, int $detectionId, string $person): JSONResponse {
+		if ($this->userId === null) {
+			return new JSONResponse(['error' => 'Authentication required'], Http::STATUS_UNAUTHORIZED);
+		}
+		try {
+			return new JSONResponse(
+				$this->importService->assign($this->userId, $fileId, $detectionId, $person),
+			);
+		} catch (\InvalidArgumentException $e) {
+			return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+		} catch (\OutOfBoundsException $e) {
+			return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+		} catch (\RuntimeException $e) {
+			return new JSONResponse(['error' => $e->getMessage()], 422);
+		} catch (\Throwable $e) {
+			$this->logger->error('digiKam face assignment failed', ['exception' => $e]);
+			return new JSONResponse(['error' => 'Face assignment failed'], Http::STATUS_INTERNAL_SERVER_ERROR);
+		}
+	}
 }

@@ -151,7 +151,11 @@ class ApplyExecutor:
             raise RuntimeError(f"The Memories face was named after the preview: {action['path']}")
         if self.backend is None:
             raise RuntimeError("The Nextcloud connection is unavailable.")
-        cluster = self.backend.get_or_create_cluster(person)
+        cluster = (
+            0
+            if getattr(self.backend, "supports_assign", False)
+            else self.backend.get_or_create_cluster(person)
+        )
         self.backend.assign_person(face, person, nc_file, cluster)
         return {
             "changed": True,

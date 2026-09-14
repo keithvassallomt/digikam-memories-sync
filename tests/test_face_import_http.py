@@ -2,7 +2,7 @@ import json
 import unittest
 from urllib.parse import parse_qs, urlparse
 
-from digikam_nextcloud.models import NextcloudFile, Rect
+from digikam_nextcloud.models import FaceRegion, NextcloudFile, Rect
 from digikam_nextcloud.nextcloud_http import (
     FACE_SYNC_APP_INSTALL_URL,
     NextcloudConnectionError,
@@ -17,6 +17,7 @@ class FaceImportHTTPTests(unittest.TestCase):
         backend.timeout = 60.0
         backend.supports_insert = True
         backend.supports_export = True
+        backend.supports_assign = False
         return backend
 
     def test_capability_probe_enables_only_matching_api(self):
@@ -29,17 +30,18 @@ class FaceImportHTTPTests(unittest.TestCase):
                     "apiVersion": 2,
                     "createFaceDetection": True,
                     "listFaceDetections": True,
+                    "assignFaceDetection": True,
                 }
             ).encode(),
         )
 
         self.assertEqual(
-            backend._probe_face_sync_app(), {"create": True, "list": True}
+            backend._probe_face_sync_app(), {"create": True, "list": True, "assign": True}
         )
 
         backend._request = lambda *args, **kwargs: (404, {}, b"")
         self.assertEqual(
-            backend._probe_face_sync_app(), {"create": False, "list": False}
+            backend._probe_face_sync_app(), {"create": False, "list": False, "assign": False}
         )
 
     def test_named_face_export_is_paginated_and_parsed(self):
@@ -190,6 +192,39 @@ class FaceImportHTTPTests(unittest.TestCase):
                 cluster_id=456,
                 person="Gail Vassallo",
             )
+
+    def test_companion_assignment_handles_unclustered_detection(self):
+        backend = self.make_backend()
+        backend.supports_assign = True
+        captured = {}
+
+        def request(method, path, **kwargs):
+            captured.update(method=method, path=path, **kwargs)
+            return 200, {}, json.dumps({"changed": True}).encode()
+
+        backend._request = request
+        face = FaceRegion(
+            person="", rect=Rect(0.1, 0.2, 0.3, 0.4), source="nextcloud",
+            nc_file_id=123, nc_detection_id=987, nc_cluster_id=None,
+            dav_parent="", file_name="photo.jpg",
+        )
+        nc_file = NextcloudFile(
+            file_id=123, path="Photos/photo.jpg", name="photo.jpg", size=0,
+        )
+
+        backend.assign_person(face, "Gail Vassallo", nc_file, 0)
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(
+            captured["path"],
+            "index.php/apps/digikam_face_sync/api/v1/face-assign",
+        )
+        self.assertEqual(
+            json.loads(captured["body"]),
+            {"fileId": 123, "detectionId": 987, "person": "Gail Vassallo"},
+        )
+        self.assertEqual(face.person, "Gail Vassallo")
+        self.assertEqual(face.dav_parent, "Gail Vassallo")
 
     def test_numeric_cluster_fallback_is_not_treated_as_a_person(self):
         backend = self.make_backend()

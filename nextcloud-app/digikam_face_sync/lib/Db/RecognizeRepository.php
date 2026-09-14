@@ -32,6 +32,38 @@ final class RecognizeRepository {
 	}
 
 	/** @return array<string, mixed>|null */
+	public function findDetection(int $detectionId, int $fileId, string $userId): ?array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('id', 'file_id', 'user_id', 'x', 'y', 'width', 'height', 'cluster_id', 'threshold')
+			->from(self::DETECTIONS_TABLE)
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($detectionId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('file_id', $qb->createNamedParameter($fileId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)))
+			->setMaxResults(1);
+		$result = $qb->executeQuery();
+		$row = $result->fetch();
+		$result->closeCursor();
+		return is_array($row) ? $row : null;
+	}
+
+	public function assignDetectionCluster(
+		int $detectionId,
+		int $fileId,
+		string $userId,
+		int $clusterId,
+	): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update(self::DETECTIONS_TABLE)
+			->set('cluster_id', $qb->createNamedParameter($clusterId, IQueryBuilder::PARAM_INT))
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($detectionId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('file_id', $qb->createNamedParameter($fileId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)));
+		if ($qb->executeStatement() !== 1) {
+			throw new \RuntimeException('Face detection changed before it could be assigned');
+		}
+	}
+
+	/** @return array<string, mixed>|null */
 	public function findClusterById(int $clusterId): ?array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('id', 'title', 'user_id')

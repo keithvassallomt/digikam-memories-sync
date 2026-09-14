@@ -25,8 +25,9 @@ final class FaceImportService {
 			$compatibility['reason'] = 'Recognize face database tables are missing';
 		}
 		return [
-			'apiVersion' => 2,
+			'apiVersion' => 3,
 			'createFaceDetection' => $compatibility['available'],
+			'assignFaceDetection' => $this->repository->isAvailable(),
 			'listFaceDetections' => $this->repository->isAvailable(),
 			'listPeople' => $this->repository->isAvailable(),
 			'coordinates' => 'relative',
@@ -34,6 +35,35 @@ final class FaceImportService {
 			'recognizeVersion' => $compatibility['recognizeVersion'],
 			'reason' => $compatibility['reason'],
 		];
+	}
+
+	/** @return array{changed: bool, detection: array<string, mixed>} */
+	public function assign(
+		string $userId,
+		int $fileId,
+		int $detectionId,
+		string $person,
+	): array {
+		if (!$this->repository->isAvailable()) {
+			throw new \RuntimeException('Recognize face database tables are missing');
+		}
+		$person = self::validatePerson($person);
+		$node = $this->rootFolder->getUserFolder($userId)->getFirstNodeById($fileId);
+		if (!$node instanceof File || !str_starts_with($node->getMimeType(), 'image/')) {
+			throw new \OutOfBoundsException('Image was not found or is not accessible');
+		}
+		$detection = $this->repository->findDetection($detectionId, $fileId, $userId);
+		if ($detection === null) {
+			throw new \OutOfBoundsException('Face detection was not found for this image');
+		}
+
+		$clusterId = $this->repository->getOrCreateCluster($userId, $person);
+		$changed = (int)($detection['cluster_id'] ?? 0) !== $clusterId;
+		if ($changed) {
+			$this->repository->assignDetectionCluster($detectionId, $fileId, $userId, $clusterId);
+			$detection['cluster_id'] = $clusterId;
+		}
+		return ['changed' => $changed, 'detection' => self::detectionResponse($detection)];
 	}
 
 	/** @return array{created: bool, detection: array<string, mixed>, score: float|null} */

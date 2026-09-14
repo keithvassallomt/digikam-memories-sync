@@ -6,13 +6,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from digikam_nextcloud.apply import ApplyExecutor, build_apply_plan, plan_summary
-from digikam_nextcloud.app_service import AppService
+from digikam_nextcloud.app_service import AppService, is_systemic_apply_failure
 from digikam_nextcloud.digikam_writer import (
     DigikamWriter,
     create_sqlite_backup,
     terminate_digikam,
 )
 from digikam_nextcloud.models import FaceRegion, NextcloudFile, NextcloudRequirements, Rect
+from digikam_nextcloud.nextcloud_http import NextcloudConnectionError
 from digikam_nextcloud.settings import SettingsStore
 from digikam_nextcloud.state_store import StateStore
 
@@ -72,6 +73,8 @@ def make_writable_digikam(path: Path) -> None:
 
 
 class FakeApplyBackend:
+    supports_assign = False
+
     def __init__(self, faces=None):
         self.file = NextcloudFile(
             file_id=7, path="Photos/2026/photo.jpg", name="photo.jpg", size=10,
@@ -240,6 +243,20 @@ class ApplyPlanTests(unittest.TestCase):
 
 
 class ApplyServiceTests(unittest.TestCase):
+    def test_only_systemic_failures_trigger_the_apply_safety_stop(self):
+        self.assertFalse(is_systemic_apply_failure(RuntimeError(
+            "Recognize face-import failed (HTTP 422): No face found inside the supplied rectangle"
+        )))
+        self.assertFalse(is_systemic_apply_failure(RuntimeError(
+            "This Memories face has not been clustered yet."
+        )))
+        self.assertTrue(is_systemic_apply_failure(
+            NextcloudConnectionError("Nextcloud connection failed")
+        ))
+        self.assertTrue(is_systemic_apply_failure(RuntimeError(
+            "HTTP POST failed after retries: connection reset"
+        )))
+
     def test_interrupted_apply_is_recovered_and_remains_latest(self):
         with tempfile.TemporaryDirectory() as temp:
             state = StateStore(Path(temp) / "state.sqlite3")

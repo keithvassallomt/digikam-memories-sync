@@ -19,7 +19,7 @@ from .digikam_writer import (
     terminate_digikam,
 )
 from .apply import ApplyExecutor, build_apply_plan, plan_summary
-from .nextcloud_http import NextcloudHTTP, fetch_file_preview
+from .nextcloud_http import NextcloudConnectionError, NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
 from .settings import SettingsStore
 from .state_store import StateStore
@@ -32,6 +32,19 @@ LOG = logging.getLogger(__name__)
 
 class InvalidDigikamLibrary(ValueError):
     pass
+
+
+def is_systemic_apply_failure(error: Exception) -> bool:
+    """Return true when retrying every remaining action is likely to fail."""
+    if isinstance(error, (NextcloudConnectionError, ConnectionError, TimeoutError, OSError)):
+        return True
+    message = str(error).lower()
+    if "failed after retries" in message:
+        return True
+    return any(
+        f"http {status}" in message
+        for status in (401, 403, 408, 429, 500, 502, 503, 504)
+    )
 
 
 def resolve_digikam_database(value: str | Path) -> Path:
@@ -301,7 +314,10 @@ class AppService:
                 except Exception as error:
                     LOG.exception("Apply action %s failed", item["id"])
                     self.state.finish_apply_action(item["id"], "failed", error=str(error))
-                    consecutive_failures += 1
+                    if is_systemic_apply_failure(error):
+                        consecutive_failures += 1
+                    else:
+                        consecutive_failures = 0
                 counts = self.state.apply_counts(run_id)
                 self.state.update_progress(
                     run_id,

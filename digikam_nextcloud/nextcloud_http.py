@@ -192,6 +192,7 @@ class NextcloudHTTP:
 
     supports_insert = False
     supports_export = False
+    supports_assign = False
     generates_face_vectors = False
 
     def __init__(
@@ -255,6 +256,7 @@ class NextcloudHTTP:
         capabilities = self._probe_face_sync_app()
         self.supports_insert = capabilities["create"]
         self.supports_export = capabilities["list"]
+        self.supports_assign = capabilities["assign"]
         self.generates_face_vectors = self.supports_insert
 
     def _probe_recognize_installation(self) -> bool:
@@ -292,6 +294,9 @@ class NextcloudHTTP:
     def face_import_url(self) -> str:
         return "index.php/apps/digikam_face_sync/api/v1/face-import"
 
+    def face_assign_url(self) -> str:
+        return "index.php/apps/digikam_face_sync/api/v1/face-assign"
+
     def _probe_face_sync_app(self) -> dict[str, bool]:
         """Detect the authenticated companion app capabilities."""
         try:
@@ -305,11 +310,12 @@ class NextcloudHTTP:
             )
             if status != 200:
                 LOG.debug("Recognize face-import API unavailable (HTTP %s)", status)
-                return {"create": False, "list": False}
+                return {"create": False, "list": False, "assign": False}
             payload = json.loads(raw.decode("utf-8"))
             capabilities = {
                 "create": payload.get("createFaceDetection") is True,
                 "list": payload.get("listFaceDetections") is True,
+                "assign": payload.get("assignFaceDetection") is True,
             }
             if capabilities["create"]:
                 LOG.info("Recognize face-import API available")
@@ -318,7 +324,7 @@ class NextcloudHTTP:
             return capabilities
         except Exception as e:
             LOG.debug("Could not probe Face Sync companion API: %s", e)
-            return {"create": False, "list": False}
+            return {"create": False, "list": False, "assign": False}
 
     def face_list_url(self) -> str:
         return "index.php/apps/digikam_face_sync/api/v1/faces"
@@ -1310,17 +1316,51 @@ class NextcloudHTTP:
         cluster_id: int,
     ) -> None:
         del cluster_id
-        self.ensure_recognize_access()
         person = sanitize_person_name(person)
         if not person:
             raise ValueError("person name empty after sanitization")
         if detection.nc_detection_id is None:
             raise ValueError("detection id required")
+        if self.supports_assign:
+            body = json.dumps(
+                {
+                    "fileId": nc_file.file_id,
+                    "detectionId": detection.nc_detection_id,
+                    "person": person,
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            status, _, raw = self._request(
+                "POST",
+                self.face_assign_url(),
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "OCS-APIRequest": "true",
+                },
+                body=body,
+            )
+            try:
+                payload = json.loads(raw.decode("utf-8")) if raw else {}
+            except json.JSONDecodeError as e:
+                raise RuntimeError(
+                    f"Face assignment returned invalid JSON (HTTP {status})"
+                ) from e
+            if status != 200:
+                detail = payload.get("error") if isinstance(payload, dict) else None
+                raise RuntimeError(
+                    f"Face assignment failed (HTTP {status}): "
+                    f"{detail or raw[:300].decode(errors='replace')}"
+                )
+            detection.dav_parent = person
+            detection.person = person
+            return
+
+        self.ensure_recognize_access()
         if not detection.dav_parent:
             raise RuntimeError(
-                f"Detection {detection.nc_detection_id} has no DAV parent "
-                "(unclustered/null). HTTP backend cannot reassign it until "
-                "Recognize has clustered the face (or use backend=db)."
+                "This Memories face has not been clustered yet. Update the "
+                "Nextcloud Face Sync companion app, then retry this change."
             )
 
         # Ensure destination person collection exists
