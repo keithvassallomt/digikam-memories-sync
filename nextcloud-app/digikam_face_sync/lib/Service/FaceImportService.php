@@ -25,8 +25,9 @@ final class FaceImportService {
 			$compatibility['reason'] = 'Recognize face database tables are missing';
 		}
 		return [
-			'apiVersion' => 3,
+			'apiVersion' => 4,
 			'createFaceDetection' => $compatibility['available'],
+			'confirmedFaceImport' => $compatibility['available'],
 			'assignFaceDetection' => $this->repository->isAvailable(),
 			'listFaceDetections' => $this->repository->isAvailable(),
 			'listPeople' => $this->repository->isAvailable(),
@@ -75,6 +76,7 @@ final class FaceImportService {
 		float $y,
 		float $width,
 		float $height,
+		bool $confirmed = false,
 	): array {
 		$capabilities = $this->capabilities();
 		if (!$capabilities['createFaceDetection']) {
@@ -102,7 +104,7 @@ final class FaceImportService {
 			throw new \DomainException('An overlapping face detection already belongs to another person');
 		}
 
-		$descriptor = $this->descriptorExtractor->extract($node, $x, $y, $width, $height);
+		$descriptor = $this->descriptorExtractor->extract($node, $x, $y, $width, $height, $confirmed);
 		$clusterId = $this->repository->getOrCreateCluster($userId, $person);
 		$detectionId = $this->repository->insertDetection(
 			$userId,

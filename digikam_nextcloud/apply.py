@@ -185,6 +185,7 @@ class ApplyExecutor:
             rect=wanted,
             cluster_id=cluster,
             person=person,
+            confirmed=action.get("confirmed_face") is True,
         )
         faces.append(
             FaceRegion(

@@ -27,21 +27,24 @@ class FaceImportHTTPTests(unittest.TestCase):
             {},
             json.dumps(
                 {
-                    "apiVersion": 2,
+                    "apiVersion": 4,
                     "createFaceDetection": True,
                     "listFaceDetections": True,
                     "assignFaceDetection": True,
+                    "confirmedFaceImport": True,
                 }
             ).encode(),
         )
 
         self.assertEqual(
-            backend._probe_face_sync_app(), {"create": True, "list": True, "assign": True}
+            backend._probe_face_sync_app(),
+            {"create": True, "list": True, "assign": True, "confirmed": True},
         )
 
         backend._request = lambda *args, **kwargs: (404, {}, b"")
         self.assertEqual(
-            backend._probe_face_sync_app(), {"create": False, "list": False, "assign": False}
+            backend._probe_face_sync_app(),
+            {"create": False, "list": False, "assign": False, "confirmed": False},
         )
 
     def test_named_face_export_is_paginated_and_parsed(self):
@@ -192,6 +195,26 @@ class FaceImportHTTPTests(unittest.TestCase):
                 cluster_id=456,
                 person="Gail Vassallo",
             )
+
+    def test_confirmed_insert_marks_a_user_reviewed_face(self):
+        backend = self.make_backend()
+        backend.supports_confirmed_insert = True
+        captured = {}
+
+        def request(method, path, **kwargs):
+            captured.update(method=method, path=path, **kwargs)
+            return 201, {}, json.dumps({"detection": {"id": 987}}).encode()
+
+        backend._request = request
+        backend.insert_detection(
+            file_id=123,
+            rect=Rect(0.1, 0.2, 0.3, 0.4),
+            cluster_id=456,
+            person="Gail Vassallo",
+            confirmed=True,
+        )
+
+        self.assertTrue(json.loads(captured["body"])["confirmed"])
 
     def test_companion_assignment_handles_unclustered_detection(self):
         backend = self.make_backend()

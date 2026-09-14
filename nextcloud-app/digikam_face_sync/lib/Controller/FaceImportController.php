@@ -35,12 +35,13 @@ final class FaceImportController extends Controller {
 		float $y,
 		float $width,
 		float $height,
+		bool $confirmed = false,
 	): JSONResponse {
 		if ($this->userId === null) {
 			return new JSONResponse(['error' => 'Authentication required'], Http::STATUS_UNAUTHORIZED);
 		}
 		try {
-			$result = $this->importService->import($this->userId, $fileId, $person, $x, $y, $width, $height);
+			$result = $this->importService->import($this->userId, $fileId, $person, $x, $y, $width, $height, $confirmed);
 			return new JSONResponse($result, $result['created'] ? Http::STATUS_CREATED : Http::STATUS_OK);
 		} catch (\InvalidArgumentException $e) {
 			return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);

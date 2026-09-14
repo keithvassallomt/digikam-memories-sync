@@ -193,6 +193,7 @@ class NextcloudHTTP:
     supports_insert = False
     supports_export = False
     supports_assign = False
+    supports_confirmed_insert = False
     generates_face_vectors = False
 
     def __init__(
@@ -257,6 +258,7 @@ class NextcloudHTTP:
         self.supports_insert = capabilities["create"]
         self.supports_export = capabilities["list"]
         self.supports_assign = capabilities["assign"]
+        self.supports_confirmed_insert = capabilities["confirmed"]
         self.generates_face_vectors = self.supports_insert
 
     def _probe_recognize_installation(self) -> bool:
@@ -310,12 +312,13 @@ class NextcloudHTTP:
             )
             if status != 200:
                 LOG.debug("Recognize face-import API unavailable (HTTP %s)", status)
-                return {"create": False, "list": False, "assign": False}
+                return {"create": False, "list": False, "assign": False, "confirmed": False}
             payload = json.loads(raw.decode("utf-8"))
             capabilities = {
                 "create": payload.get("createFaceDetection") is True,
                 "list": payload.get("listFaceDetections") is True,
                 "assign": payload.get("assignFaceDetection") is True,
+                "confirmed": payload.get("confirmedFaceImport") is True,
             }
             if capabilities["create"]:
                 LOG.info("Recognize face-import API available")
@@ -324,7 +327,7 @@ class NextcloudHTTP:
             return capabilities
         except Exception as e:
             LOG.debug("Could not probe Face Sync companion API: %s", e)
-            return {"create": False, "list": False, "assign": False}
+            return {"create": False, "list": False, "assign": False, "confirmed": False}
 
     def face_list_url(self) -> str:
         return "index.php/apps/digikam_face_sync/api/v1/faces"
@@ -1414,6 +1417,7 @@ class NextcloudHTTP:
         person: Optional[str] = None,
         face_vector: Optional[list[float]] = None,
         threshold: float = 0.0,
+        confirmed: bool = False,
     ) -> int:
         del cluster_id, face_vector, threshold
         if not self.supports_insert:
@@ -1423,18 +1427,22 @@ class NextcloudHTTP:
         person = sanitize_person_name(person or "")
         if not person:
             raise ValueError("person name empty after sanitization")
+        if confirmed and not self.supports_confirmed_insert:
+            raise RuntimeError(
+                "Update the Nextcloud Face Sync companion app before adding a reviewed face."
+            )
 
-        body = json.dumps(
-            {
-                "fileId": file_id,
-                "person": person,
-                "x": rect.x,
-                "y": rect.y,
-                "width": rect.w,
-                "height": rect.h,
-            },
-            separators=(",", ":"),
-        ).encode("utf-8")
+        request_body = {
+            "fileId": file_id,
+            "person": person,
+            "x": rect.x,
+            "y": rect.y,
+            "width": rect.w,
+            "height": rect.h,
+        }
+        if confirmed:
+            request_body["confirmed"] = True
+        body = json.dumps(request_body, separators=(",", ":")).encode("utf-8")
         status, _, raw = self._request(
             "POST",
             self.face_import_url(),

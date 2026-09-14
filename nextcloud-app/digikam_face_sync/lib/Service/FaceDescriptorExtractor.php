@@ -58,7 +58,7 @@ final class FaceDescriptorExtractor {
 	}
 
 	/** @return array{vector: list<float>, score: float} */
-	public function extract(File $file, float $x, float $y, float $width, float $height): array {
+	public function extract(File $file, float $x, float $y, float $width, float $height, bool $confirmed = false): array {
 		$compatibility = $this->compatibility();
 		if (!$compatibility['available']) {
 			throw new \RuntimeException($compatibility['reason'] ?? 'Recognize is unavailable');
@@ -73,6 +73,7 @@ final class FaceDescriptorExtractor {
 				'y' => $y,
 				'width' => $width,
 				'height' => $height,
+				'confirmed' => $confirmed,
 			], JSON_THROW_ON_ERROR) . "\n";
 
 			$command = [

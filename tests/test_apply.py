@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -82,6 +83,7 @@ class FakeApplyBackend:
         )
         self.faces = list(faces or [])
         self.closed = False
+        self.last_insert = None
 
     def connection_requirements(self):
         return NextcloudRequirements(True, True, "https://install.test")
@@ -97,6 +99,7 @@ class FakeApplyBackend:
         face.dav_parent = person
 
     def insert_detection(self, **kwargs):
+        self.last_insert = kwargs
         return 99
 
     def close(self):
@@ -229,7 +232,9 @@ class ApplyPlanTests(unittest.TestCase):
                     "target": "memories", "operation": "insert_memories",
                     "path": "2026/photo.jpg", "person": "April Vassallo",
                     "rect": [0.6, 0.2, 0.2, 0.2], "nc_file_id": 7,
+                    "confirmed_face": True,
                 })
+                self.assertTrue(backend.last_insert["confirmed"])
                 repeated = executor.execute({
                     "target": "memories", "operation": "insert_memories",
                     "path": "2026/photo.jpg", "person": "April Vassallo",
@@ -301,10 +306,23 @@ class ApplyServiceTests(unittest.TestCase):
 
                 self.assertEqual(review["remaining"], 0)
                 self.assertEqual(review["pending"], 1)
+                with state.lock:
+                    row = state.conn.execute(
+                        "SELECT action_json FROM run_actions WHERE id = ?",
+                        (pending["id"],),
+                    ).fetchone()
+                    old_action = json.loads(row["action_json"])
+                    old_action.pop("confirmed_face")
+                    state.conn.execute(
+                        "UPDATE run_actions SET action_json = ? WHERE id = ?",
+                        (json.dumps(old_action), pending["id"]),
+                    )
+                    state.conn.commit()
                 state.initialize_apply(run_id, [self.failed_face_action()])
                 queued = state.pending_apply_actions(run_id)[0]["action"]
                 self.assertEqual(queued["rect"], [0.12, 0.18, 0.34, 0.46])
                 self.assertEqual(queued["digikam_rect"], [0.1, 0.2, 0.3, 0.4])
+                self.assertTrue(queued["confirmed_face"])
                 state.finish_apply_action(
                     pending["id"], "failed", error="Still no face found"
                 )

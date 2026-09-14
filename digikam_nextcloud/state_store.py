@@ -233,11 +233,12 @@ class StateStore:
                 raise ValueError("The saved Apply plan does not match this preview.")
             if existing:
                 saved = self.conn.execute(
-                    """SELECT action_json,result_json FROM run_actions
+                    """SELECT id,action_json,result_json FROM run_actions
                        WHERE run_id = ? ORDER BY position""",
                     (run_id,),
                 ).fetchall()
                 plan_matches = True
+                confirmed_upgrades: list[tuple[str, int]] = []
                 for row, original in zip(saved, plan, strict=True):
                     current = json.loads(row["action_json"])
                     if current == original:
@@ -250,7 +251,9 @@ class StateStore:
                     )
                     source_rect = current.get(source_rect_name)
                     current_without_rect = {
-                        k: v for k, v in current.items() if k not in {"rect", source_rect_name}
+                        k: v
+                        for k, v in current.items()
+                        if k not in {"rect", source_rect_name, "confirmed_face"}
                     }
                     original_without_rect = {k: v for k, v in original.items() if k != "rect"}
                     if not (
@@ -260,8 +263,19 @@ class StateStore:
                     ):
                         plan_matches = False
                         break
+                    if (
+                        current.get("operation") == "insert_memories"
+                        and current.get("confirmed_face") is not True
+                    ):
+                        current["confirmed_face"] = True
+                        confirmed_upgrades.append((json.dumps(current), int(row["id"])))
                 if not plan_matches:
                     raise ValueError("The saved Apply plan does not match this preview.")
+                if confirmed_upgrades:
+                    self.conn.executemany(
+                        "UPDATE run_actions SET action_json = ? WHERE id = ?",
+                        confirmed_upgrades,
+                    )
             if not existing:
                 self.conn.executemany(
                     """INSERT INTO run_actions(run_id, position, target, operation, action_json)
@@ -468,6 +482,7 @@ class StateStore:
                 action = json.loads(row["action_json"])
                 if str(row["operation"]) == "insert_memories":
                     action.setdefault("digikam_rect", action["rect"])
+                    action["confirmed_face"] = True
                 elif str(row["operation"]) == "create_digikam":
                     action.setdefault("nextcloud_rect", action["rect"])
                 action["rect"] = values

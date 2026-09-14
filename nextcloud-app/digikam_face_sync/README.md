@@ -22,7 +22,9 @@ The face-list endpoints return only the signed-in user's accessible files and
 use cursor pagination. The POST request verifies file access, rejects overlapping conflicting faces,
 generates a real descriptor with Recognize's locally installed model, and then
 writes the detection into Recognize's existing tables. Retrying an identical
-request returns the existing detection.
+request returns the existing detection. A face explicitly confirmed in the
+desktop review screen can bypass Recognize's automatic detector; the app still
+uses Recognize's landmark alignment and recognition model to create its descriptor.
 
 The assignment endpoint verifies that both the image and detection belong to
 the signed-in user before assigning an existing detection to a named person.

@@ -466,8 +466,9 @@ class NextcloudDB:
         person: Optional[str] = None,
         face_vector: Optional[list[float]] = None,
         threshold: float = 0.0,
+        confirmed: bool = False,
     ) -> int:
-        del person
+        del person, confirmed
         det = self.t("recognize_face_detections")
         vec = (
             face_vector

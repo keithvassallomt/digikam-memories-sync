@@ -215,7 +215,7 @@
                   </div>
                 </div>
                 <p id="failure-path" class="photo-caption"></p>
-                <p class="photo-caption">Drag the box or its corners if the face area is wrong.</p>
+                <p class="photo-caption">If the box is wrong, drag it or resize it before adding the face.</p>
               </div>
               <div>
                 <section class="card failure-detail-card">
@@ -224,7 +224,7 @@
                   <p id="failure-reason"></p>
                 </section>
                 <button id="keep-source-button" class="name-choice" type="button"><span><strong id="keep-source-title">Keep only here</strong><small id="keep-source-detail"></small></span></button>
-                <button id="retry-face-button" class="name-choice" type="button"><span><strong>Adjust the box to retry</strong><small>Drag the box or its corners, then retry the face.</small></span></button>
+                <button id="retry-face-button" class="name-choice" type="button"><span><strong id="retry-face-title">Add using this box</strong><small id="retry-face-detail">Use the box shown, or adjust it first.</small></span></button>
                 <label id="keep-all-failures-label" class="apply-all"><input id="keep-all-failures" type="checkbox"><span><strong>Keep all remaining rejected faces in their current library</strong><small>They will be ignored in future scans.</small></span></label>
               </div>
             </div>
@@ -235,7 +235,7 @@
             <h1>Decisions saved</h1>
             <p id="failure-complete-lead" class="lead"></p>
             <section class="card"><p class="completion-mark" aria-hidden="true">✓</p><h2 id="failure-complete-summary"></h2><p>Faces kept in one library will not be offered again unless their name or box changes.</p></section>
-            <div class="actions"><button id="failure-finish-button" class="secondary" type="button">Start another sync</button><button id="failure-retry-button" class="primary" type="button">Retry adjusted faces</button></div>
+            <div class="actions"><button id="failure-finish-button" class="secondary" type="button">Start another sync</button><button id="failure-retry-button" class="primary" type="button">Apply reviewed faces</button></div>
           </div>
         </div>
       </section>

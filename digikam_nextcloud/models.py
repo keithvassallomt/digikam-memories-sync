@@ -230,6 +230,7 @@ class NextcloudBackend(Protocol):
         person: Optional[str] = None,
         face_vector: Optional[list[float]] = None,
         threshold: float = 0.0,
+        confirmed: bool = False,
     ) -> int: ...
 
     def sample_cluster_vector(self, cluster_id: int) -> Optional[list[float]]: ...

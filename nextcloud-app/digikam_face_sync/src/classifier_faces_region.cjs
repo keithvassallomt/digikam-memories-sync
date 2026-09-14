@@ -86,7 +86,7 @@ async function descriptorForRegion(tensor, region) {
 		const height = Math.max(1, Math.ceil((y2 - y1) * imageHeight))
 		const crop = tf.tidy(() => {
 			const sliced = tf.slice(tensor, [top, left, 0], [Math.min(height, imageHeight - top), Math.min(width, imageWidth - left), 3])
-			return tf.image.resizeBilinear(sliced, [320, 320])
+			return sliced.clone()
 		})
 
 		try {
@@ -112,9 +112,40 @@ async function descriptorForRegion(tensor, region) {
 			crop.dispose()
 		}
 	}
-	return best === null ? null : {
-		vector: Array.from(best.result.descriptor),
-		score: best.result.detection.score,
+	if (best !== null) {
+		return {
+			vector: Array.from(best.result.descriptor),
+			score: best.result.detection.score,
+			method: 'detected',
+		}
+	}
+	if (region.confirmed !== true) return null
+	return descriptorForConfirmedRegion(tensor, region)
+}
+
+async function descriptorForConfirmedRegion(tensor, region) {
+	const imageHeight = tensor.shape[0]
+	const imageWidth = tensor.shape[1]
+	const left = Math.max(0, Math.floor(region.x * imageWidth))
+	const top = Math.max(0, Math.floor(region.y * imageHeight))
+	const width = Math.max(1, Math.min(imageWidth - left, Math.ceil(region.width * imageWidth)))
+	const height = Math.max(1, Math.min(imageHeight - top, Math.ceil(region.height * imageHeight)))
+	const face = tf.tidy(() => tf.slice(tensor, [top, left, 0], [height, width, 3]).clone())
+	let alignedFaces = []
+	try {
+		// A reviewed digiKam box is already the face detection. Run the same
+		// landmark alignment and recognition model that Recognize uses after SSD.
+		const landmarks = await faceapi.nets.faceLandmark68Net.detectLandmarks(face)
+		const alignedBox = landmarks.align(null, { useDlibAlignment: true })
+		alignedFaces = await faceapi.extractFaceTensors(face, [alignedBox])
+		if (alignedFaces.length !== 1) return null
+		const descriptor = await faceapi.nets.faceRecognitionNet.computeFaceDescriptor(alignedFaces[0])
+		const vector = Array.from(descriptor)
+		if (vector.length !== 128 || vector.some(value => !Number.isFinite(value))) return null
+		return { vector, score: 0, method: 'confirmed-region' }
+	} finally {
+		face.dispose()
+		alignedFaces.forEach(aligned => aligned.dispose())
 	}
 }
 

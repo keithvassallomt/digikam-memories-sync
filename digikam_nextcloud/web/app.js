@@ -543,7 +543,7 @@ async function openApplyReview() {
 
 function friendlyFailureReason(failure) {
   if (failure.error.includes('No face found inside the supplied rectangle')) {
-    return 'Recognize could not detect a usable face inside this box.';
+    return 'Recognize’s automatic detector did not accept this face. If the box is correct, add it using the box below.';
   }
   return failure.error;
 }
@@ -622,11 +622,13 @@ function showFailure(index) {
   document.getElementById('failure-box-label').textContent = `${source}: ${failure.person || 'Unnamed'}`;
   document.getElementById('keep-source-title').textContent = `Keep only in ${source}`;
   document.getElementById('keep-source-detail').textContent = `Remember this choice and do not offer the face in future scans.`;
+  document.getElementById('retry-face-title').textContent = `Add to ${destination} using this box`;
+  document.getElementById('retry-face-detail').textContent = 'Use the box shown, or adjust it first.';
   document.getElementById('keep-all-failures').checked = false;
   document.getElementById('keep-all-failures-label').hidden = !failure.reviewable;
   document.getElementById('keep-source-button').hidden = !failure.reviewable;
   document.getElementById('keep-source-button').disabled = false;
-  document.getElementById('retry-face-button').disabled = failure.reviewable;
+  document.getElementById('retry-face-button').disabled = !failure.reviewable;
   const messageBox = document.getElementById('failure-message');
   messageBox.textContent = '';
   messageBox.className = 'message';
@@ -639,9 +641,9 @@ function showFailureReviewComplete(result) {
   const pending = result.pending || 0;
   const ignored = result.ignored || 0;
   document.getElementById('failure-complete-lead').textContent = pending
-    ? `${pending} adjusted face${pending === 1 ? '' : 's'} ready to retry.`
+    ? `${pending} reviewed face${pending === 1 ? '' : 's'} ready to apply.`
     : 'Every rejected face now has a saved decision.';
-  document.getElementById('failure-complete-summary').textContent = `${ignored} kept in one library · ${pending} ready to retry`;
+  document.getElementById('failure-complete-summary').textContent = `${ignored} kept in one library · ${pending} ready to apply`;
   document.getElementById('failure-retry-button').hidden = pending === 0;
 }
 
