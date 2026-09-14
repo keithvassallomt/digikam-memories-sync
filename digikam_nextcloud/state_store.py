@@ -131,6 +131,38 @@ class StateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def recover_interrupted_applies(self) -> int:
+        """Turn jobs abandoned by a stopped local service into resumable failures."""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id FROM runs WHERE status = 'applying'"
+            ).fetchall()
+            run_ids = [int(row[0]) for row in rows]
+            if run_ids:
+                placeholders = ",".join("?" * len(run_ids))
+                self.conn.execute(
+                    f"""UPDATE runs SET status = 'apply_failed', finished_at = CURRENT_TIMESTAMP
+                        WHERE id IN ({placeholders})""",
+                    run_ids,
+                )
+                self.conn.execute(
+                    f"""UPDATE run_progress SET phase = 'apply_failed',
+                        error = 'Face Sync stopped before Apply finished.'
+                        WHERE run_id IN ({placeholders})""",
+                    run_ids,
+                )
+                self.conn.commit()
+            return len(run_ids)
+
+    def latest_actionable_run(self) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.conn.execute(
+                """SELECT id FROM runs
+                   WHERE status IN ('previewed', 'applying', 'apply_failed')
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+        return self.run(int(row[0])) if row is not None else None
+
     def create_run(self, mode: str, status: str = "previewing") -> int:
         with self.lock:
             cursor = self.conn.execute(

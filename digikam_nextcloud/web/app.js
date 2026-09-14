@@ -657,6 +657,32 @@ async function loadSettings() {
   else {
     document.querySelector('.connection').classList.add('ready');
     document.getElementById('connection-label').textContent = `Connected as ${settings.nc_user}`;
+    const latest = await api('/api/runs/latest');
+    if (latest.run?.result) {
+      currentRunId = latest.run.id;
+      if (latest.run.status === 'previewed') {
+        showPreview(latest.run.result);
+      } else if (latest.run.status === 'apply_failed') {
+        document.getElementById('connect-screen').classList.remove('active');
+        document.getElementById('apply-screen').classList.add('active');
+        steps.forEach((step, index) => {
+          step.classList.toggle('done', index < 4);
+          step.classList.toggle('current', index === 4);
+        });
+        showApplyComplete(latest.run);
+      } else if (latest.run.status === 'applying') {
+        document.getElementById('connect-screen').classList.remove('active');
+        document.getElementById('apply-screen').classList.add('active');
+        steps.forEach((step, index) => {
+          step.classList.toggle('done', index < 4);
+          step.classList.toggle('current', index === 4);
+        });
+        showApplyProgress();
+        waitForApply(currentRunId).catch((error) => {
+          document.getElementById('apply-phase').textContent = error.message;
+        });
+      }
+    }
   }
 }
 

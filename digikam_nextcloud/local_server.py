@@ -54,6 +54,11 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {"notifications": self.server.app.state.unread_notifications()},
             )
+        elif path == "/api/runs/latest":
+            self._json(
+                HTTPStatus.OK,
+                {"run": self.server.app.state.latest_actionable_run()},
+            )
         elif path.startswith("/api/runs/"):
             try:
                 parts = path.strip("/").split("/")
@@ -181,6 +186,7 @@ def create_server(config_dir: Path | None = None, port: int = 0) -> FaceSyncHTTP
     settings = SettingsStore(config_dir)
     root = settings.root
     state = StateStore(root / "state.sqlite3")
+    state.recover_interrupted_applies()
     return FaceSyncHTTPServer(("127.0.0.1", port), AppService(settings, state))
 
 

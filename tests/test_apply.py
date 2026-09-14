@@ -223,6 +223,21 @@ class ApplyPlanTests(unittest.TestCase):
 
 
 class ApplyServiceTests(unittest.TestCase):
+    def test_interrupted_apply_is_recovered_and_remains_latest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = StateStore(Path(temp) / "state.sqlite3")
+            try:
+                run_id = state.create_run("person")
+                state.save_result(run_id, {"run_id": run_id, "summary": {}, "actions": []})
+                state.initialize_apply(run_id, [])
+                self.assertEqual(state.recover_interrupted_applies(), 1)
+                latest = state.latest_actionable_run()
+                self.assertEqual(latest["id"], run_id)
+                self.assertEqual(latest["status"], "apply_failed")
+                self.assertIn("stopped", latest["error"])
+            finally:
+                state.close()
+
     def test_background_apply_backs_up_writes_and_journals(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
