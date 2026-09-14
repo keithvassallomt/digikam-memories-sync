@@ -519,6 +519,10 @@ async function openApplyReview() {
   closeCard.hidden = !review.requires_digikam_closed;
   document.getElementById('backup-card').hidden = !review.requires_digikam_closed;
   document.getElementById('digikam-closed').checked = false;
+  const closeButton = document.getElementById('close-digikam-button');
+  closeButton.hidden = !review.digikam_running;
+  closeButton.disabled = false;
+  closeButton.textContent = 'Close digiKam';
   const applyMessage = document.getElementById('apply-message');
   applyMessage.className = review.digikam_running ? 'message error' : 'message';
   applyMessage.textContent = review.digikam_running
@@ -530,6 +534,29 @@ async function openApplyReview() {
 }
 
 document.getElementById('digikam-closed').addEventListener('change', updateApplyButton);
+
+document.getElementById('close-digikam-button').addEventListener('click', async () => {
+  const button = document.getElementById('close-digikam-button');
+  const applyMessage = document.getElementById('apply-message');
+  button.disabled = true;
+  button.textContent = 'Closing digiKam…';
+  applyMessage.textContent = 'Waiting for digiKam to release its database…';
+  applyMessage.className = 'message';
+  try {
+    await api('/api/digikam/close', { method: 'POST', body: '{}' });
+    currentApplyReview.digikam_running = false;
+    document.getElementById('digikam-closed').checked = true;
+    button.hidden = true;
+    applyMessage.textContent = 'digiKam is closed. The database is ready.';
+    applyMessage.className = 'message success';
+    updateApplyButton();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = 'Try closing digiKam again';
+    applyMessage.textContent = error.message;
+    applyMessage.className = 'message error';
+  }
+});
 
 document.getElementById('apply-back-button').addEventListener('click', () => {
   document.getElementById('apply-screen').classList.remove('active');

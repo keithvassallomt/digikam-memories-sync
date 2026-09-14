@@ -103,6 +103,8 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.server.app.save_settings(payload))
             elif path == "/api/preview":
                 self._json(HTTPStatus.ACCEPTED, self.server.app.start_preview(payload))
+            elif path == "/api/digikam/close":
+                self._json(HTTPStatus.OK, self.server.app.close_digikam())
             elif path.startswith("/api/runs/"):
                 parts = path.strip("/").split("/")
                 if len(parts) == 4 and parts[3] == "apply":

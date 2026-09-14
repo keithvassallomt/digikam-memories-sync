@@ -159,7 +159,10 @@
           <section id="close-digikam-card" class="card close-card">
             <h2>Close digiKam before continuing</h2>
             <p>digiKam must be closed while Face Sync updates its face database.</p>
-            <label class="confirmation"><input id="digikam-closed" type="checkbox"><span>I have closed digiKam</span></label>
+            <div class="close-digikam-controls">
+              <label class="confirmation"><input id="digikam-closed" type="checkbox"><span>I have closed digiKam</span></label>
+              <button id="close-digikam-button" class="secondary" type="button" hidden>Close digiKam</button>
+            </div>
           </section>
           <div id="apply-message" class="message" aria-live="polite"></div>
           <div class="actions"><button id="apply-back-button" class="secondary" type="button">Back</button><button id="apply-button" class="primary" type="button">Apply changes</button></div>

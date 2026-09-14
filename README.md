@@ -53,7 +53,9 @@ directions.
 The interface implements first-run setup, All/One-person selection, a read-only
 two-way preview, conflict decisions and an explicit Apply step. Close digiKam
 before applying local changes; the UI checks this on Linux and always requires
-confirmation. Preview runs, notifications, conflict decisions, operation
+confirmation. If digiKam remains open without a visible window, the Apply page
+can ask it to close and waits until it releases the database. Preview runs,
+notifications, conflict decisions, operation
 results and face links are persisted in the application state database.
 
 Backups are stored under the application's configuration directory in

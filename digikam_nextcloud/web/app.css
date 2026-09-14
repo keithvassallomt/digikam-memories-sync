@@ -114,6 +114,7 @@ progress { accent-color: var(--brand); display: block; height: 18px; width: 100%
 .close-card p { color: var(--muted); margin: 7px 0 14px; }
 .confirmation { align-items: center; color: var(--ink); display: flex; font-size: 15px; gap: 10px; }
 .confirmation input { flex: 0 0 auto; margin: 0; min-height: auto; width: auto; }
+.close-digikam-controls { align-items: center; display: flex; gap: 14px; justify-content: space-between; }
 .backup-path { color: var(--muted); font-size: 12px; margin: 10px 0 0; overflow-wrap: anywhere; }
 .completion-mark.failed { color: var(--bad); }
 .apply-errors { color: var(--bad); font-size: 13px; margin: 15px 0 0; padding-left: 20px; }

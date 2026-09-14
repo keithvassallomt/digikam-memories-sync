@@ -4,7 +4,9 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
+import time
 import uuid
+import signal
 from pathlib import Path
 from typing import Any
 
@@ -18,15 +20,16 @@ class DigikamChangedError(RuntimeError):
     """The database no longer matches the preview that the user approved."""
 
 
-def digikam_is_running() -> bool:
-    """Best-effort dependency-free process check on Linux."""
+def digikam_process_ids() -> list[int]:
+    """Return matching digiKam process IDs without external dependencies."""
     if not sys.platform.startswith("linux"):
-        return False
+        return []
     proc = Path("/proc")
     try:
         entries = proc.iterdir()
     except OSError:
-        return False
+        return []
+    matches: list[int] = []
     for entry in entries:
         if not entry.name.isdigit():
             continue
@@ -38,8 +41,36 @@ def digikam_is_running() -> bool:
         except (OSError, IndexError):
             continue
         if command == "digikam" or executable == "digikam":
-            return True
-    return False
+            matches.append(int(entry.name))
+    return sorted(matches)
+
+
+def digikam_is_running() -> bool:
+    """Best-effort dependency-free process check on Linux."""
+    return bool(digikam_process_ids())
+
+
+def terminate_digikam(timeout: float = 6.0) -> dict[str, Any]:
+    """Ask digiKam to terminate, without escalating to a forced kill."""
+    if not sys.platform.startswith("linux"):
+        return {"supported": False, "closed": False, "remaining": []}
+    process_ids = digikam_process_ids()
+    if not process_ids:
+        return {"supported": True, "closed": True, "remaining": []}
+    for process_id in process_ids:
+        try:
+            os.kill(process_id, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        except PermissionError as error:
+            raise RuntimeError("Face Sync is not allowed to close digiKam.") from error
+    deadline = time.monotonic() + max(0.0, timeout)
+    remaining = process_ids
+    while remaining and time.monotonic() < deadline:
+        time.sleep(0.1)
+        running = set(digikam_process_ids())
+        remaining = [process_id for process_id in process_ids if process_id in running]
+    return {"supported": True, "closed": not remaining, "remaining": remaining}
 
 
 def create_sqlite_backup(database: str | Path, destination: str | Path) -> Path:

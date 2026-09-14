@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .digikam import DigikamDB
-from .digikam_writer import DigikamWriter, create_sqlite_backup, digikam_is_running
+from .digikam_writer import (
+    DigikamWriter,
+    create_sqlite_backup,
+    digikam_is_running,
+    terminate_digikam,
+)
 from .apply import ApplyExecutor, build_apply_plan, plan_summary
 from .nextcloud_http import NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
@@ -209,6 +214,14 @@ class AppService:
             "status": run["status"],
             "apply": run.get("apply"),
         }
+
+    def close_digikam(self) -> dict[str, Any]:
+        result = terminate_digikam()
+        if not result["supported"]:
+            raise ValueError("Automatic closing is unavailable on this platform. Close digiKam normally.")
+        if not result["closed"]:
+            raise ValueError("digiKam did not close. Quit it manually, then try again.")
+        return {"closed": True}
 
     def start_apply(self, run_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         review = self.apply_review(run_id)

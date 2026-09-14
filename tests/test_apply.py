@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 from digikam_nextcloud.apply import ApplyExecutor, build_apply_plan, plan_summary
 from digikam_nextcloud.app_service import AppService
-from digikam_nextcloud.digikam_writer import DigikamWriter, create_sqlite_backup
+from digikam_nextcloud.digikam_writer import (
+    DigikamWriter,
+    create_sqlite_backup,
+    terminate_digikam,
+)
 from digikam_nextcloud.models import FaceRegion, NextcloudFile, NextcloudRequirements, Rect
 from digikam_nextcloud.settings import SettingsStore
 from digikam_nextcloud.state_store import StateStore
@@ -153,6 +157,19 @@ class DigikamWriterTests(unittest.TestCase):
         backup = create_sqlite_backup(self.database, self.root / "backups" / "copy.db")
         with closing(sqlite3.connect(backup)) as connection:
             self.assertEqual(connection.execute("SELECT name FROM Images WHERE id=3").fetchone()[0], "photo.jpg")
+
+    def test_close_request_uses_sigterm_and_waits_for_exit(self):
+        with (
+            patch(
+                "digikam_nextcloud.digikam_writer.digikam_process_ids",
+                side_effect=[[42], []],
+            ),
+            patch("digikam_nextcloud.digikam_writer.os.kill") as send_signal,
+            patch("digikam_nextcloud.digikam_writer.time.sleep"),
+        ):
+            result = terminate_digikam()
+        self.assertTrue(result["closed"])
+        send_signal.assert_called_once()
 
 
 class ApplyPlanTests(unittest.TestCase):
