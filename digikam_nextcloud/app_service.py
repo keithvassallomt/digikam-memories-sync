@@ -983,12 +983,13 @@ class AppService:
         A conflict settled after its own run finished cannot be added to that
         run's journal, so it becomes a small run containing only decisions.
         """
+        carried = self.state.runs_carrying_decisions()
         pending = self.state.pending_decisions()
         if not pending:
-            return {"created": False, "decisions": 0}
+            return {"created": False, "decisions": 0, "carried_by": carried}
         result = conflict_preview_actions(pending)
         if not result["actions"]:
-            return {"created": False, "decisions": 0}
+            return {"created": False, "decisions": 0, "carried_by": carried}
         run_id = self.state.create_run(
             "decisions", status="previewing", trigger="decisions"
         )
@@ -1007,6 +1008,7 @@ class AppService:
             "created": True,
             "run_id": run_id,
             "decisions": len(result["actions"]),
+            "carried_by": carried,
         }
 
     def rebuild_ledger(self) -> dict[str, Any]:

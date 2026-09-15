@@ -41,32 +41,47 @@ export function create({ go, refresh }) {
 
   async function showFinished() {
     releasePhoto();
-    // Decisions made after their own run finished need a run to carry them.
-    let collected = { created: false, decisions: 0 };
+    // A decision made after its own run finished needs a run to carry it.
+    // One whose run can still carry it is left where it is.
+    let collected = { created: false, decisions: 0, carried_by: [] };
     try {
       collected = await api.post('/api/decisions/apply');
     } catch (error) {
       console.warn('The decisions could not be collected', error);
     }
     refresh();
+
+    const carrier = (collected.carried_by || [])[0];
+    let explanation;
+    let onward;
+    if (collected.created) {
+      explanation = `${count(collected.decisions)} of them are ready to apply on their own.`;
+      onward = button('Review them', {
+        class: 'button button-primary', onClick: () => go(`/runs/${collected.run_id}`),
+      });
+    } else if (carrier !== undefined) {
+      explanation = 'They will be applied along with the rest of that sync, '
+        + 'which is still waiting for you.';
+      onward = button('Review that sync', {
+        class: 'button button-primary', onClick: () => go(`/runs/${carrier}`),
+      });
+    } else {
+      explanation = 'They are applied with the rest of their sync.';
+      onward = button('Needs attention', {
+        class: 'button button-primary', onClick: () => go('/attention'),
+      });
+    }
+
     replace(body,
       h('h1', {}, 'Every name is decided'),
       h('p', { class: 'lead' }, 'Nothing has been changed yet.'),
       card(
         h('p', { class: 'completion-mark', 'aria-hidden': 'true' }, '✓'),
         h('h3', {}, 'Your decisions are saved'),
-        h('p', { class: 'muted' }, collected.created
-          ? `${count(collected.decisions)} of them are ready to apply on their own.`
-          : 'They are applied with the rest of their sync.')),
+        h('p', { class: 'muted' }, explanation)),
       h('div', { class: 'actions' },
         button('Back to Home', { onClick: () => go('/') }),
-        collected.created
-          ? button('Review them', {
-              class: 'button button-primary', onClick: () => go(`/runs/${collected.run_id}`),
-            })
-          : button('Needs attention', {
-              class: 'button button-primary', onClick: () => go('/attention'),
-            })));
+        onward));
   }
 
   function show(position) {

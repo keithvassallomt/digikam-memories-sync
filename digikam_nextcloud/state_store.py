@@ -415,30 +415,54 @@ class StateStore:
             return len(run_ids)
 
     def discard_preview(self, run_id: int) -> None:
-        """Discard a saved preview while retaining it in run history."""
+        """Discard a saved preview while retaining it in run history.
+
+        A full preview supersedes the earlier full previews it re-examined, so
+        discarding it discards those too. A decisions run supersedes nothing:
+        it holds only the decisions its own preview could not carry, and
+        discarding it must never take a waiting sync down with it.
+        """
         with self.lock:
             row = self.conn.execute(
-                "SELECT status FROM runs WHERE id = ?", (run_id,)
+                "SELECT status, mode FROM runs WHERE id = ?", (run_id,)
             ).fetchone()
             if row is None:
                 raise ValueError("Preview run not found.")
             if row["status"] != "previewed":
                 raise ValueError("Only a completed preview can be discarded.")
-            # Older completed previews have already been superseded by this one.
-            # Mark them too so none can unexpectedly reappear later.
+
+            if str(row["mode"]) == "decisions":
+                doomed = [run_id]
+            else:
+                doomed = [
+                    int(found[0])
+                    for found in self.conn.execute(
+                        """SELECT id FROM runs
+                           WHERE id <= ? AND status = 'previewed' AND mode <> 'decisions'""",
+                        (run_id,),
+                    ).fetchall()
+                ]
+            placeholders = ",".join("?" * len(doomed))
             self.conn.execute(
-                """UPDATE runs SET status = 'discarded',
-                   finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP)
-                   WHERE id <= ? AND status = 'previewed'""",
-                (run_id,),
+                f"""UPDATE runs SET status = 'discarded',
+                    finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP)
+                    WHERE id IN ({placeholders})""",
+                doomed,
             )
-            # The proposed changes go with it. Keeping them would leave rows
+            # The proposed changes go with them. Keeping them would leave rows
             # nothing can ever apply.
             self.conn.execute(
-                "DELETE FROM preview_actions WHERE run_id <= ?", (run_id,)
+                f"DELETE FROM preview_actions WHERE run_id IN ({placeholders})", doomed
             )
             self.conn.execute(
-                "DELETE FROM run_checkpoints WHERE run_id <= ?", (run_id,)
+                f"DELETE FROM run_checkpoints WHERE run_id IN ({placeholders})", doomed
+            )
+            # Decisions the discarded runs were carrying go back to being open,
+            # so they are asked again rather than silently lost.
+            self.conn.execute(
+                f"""UPDATE conflicts SET decided_run_id = NULL
+                    WHERE decided_run_id IN ({placeholders})""",
+                doomed,
             )
             self.conn.commit()
 
@@ -1177,15 +1201,48 @@ class StateStore:
             conflicts.append(item)
         return {"conflicts": conflicts, "remaining": 0, "total": len(conflicts)}
 
-    def pending_decisions(self) -> list[dict[str, Any]]:
-        """Settled conflicts that no run has applied yet."""
+    def runs_carrying_decisions(self) -> list[int]:
+        """Previews that will apply their own decisions when they are applied.
+
+        A preview that has not started applying yet can still fold a decision
+        into its plan, so its decisions must not be pulled into a follow-up
+        run. Doing that splits one sync across two, and hides the larger half.
+        """
         with self.lock:
             rows = self.conn.execute(
-                """SELECT id, run_id, resolution, detail_json FROM conflicts
-                   WHERE status = 'resolved'
-                     AND resolution IN ('digikam', 'memories')
-                     AND decided_run_id IS NULL
-                   ORDER BY id"""
+                """SELECT DISTINCT c.run_id FROM conflicts c JOIN runs r ON r.id = c.run_id
+                   WHERE c.status = 'resolved'
+                     AND c.resolution IN ('digikam', 'memories')
+                     AND c.decided_run_id IS NULL
+                     AND r.status = 'previewed'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM run_actions a WHERE a.run_id = c.run_id
+                     )
+                   ORDER BY c.run_id"""
+            ).fetchall()
+        return [int(row[0]) for row in rows]
+
+    def pending_decisions(self) -> list[dict[str, Any]]:
+        """Settled conflicts that nothing is going to apply on its own.
+
+        A decision whose own preview can still carry it is left alone. Only
+        one made after its run was journalled or finished needs a run of its
+        own.
+        """
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT c.id, c.run_id, c.resolution, c.detail_json
+                   FROM conflicts c JOIN runs r ON r.id = c.run_id
+                   WHERE c.status = 'resolved'
+                     AND c.resolution IN ('digikam', 'memories')
+                     AND c.decided_run_id IS NULL
+                     AND NOT (
+                         r.status = 'previewed'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM run_actions a WHERE a.run_id = c.run_id
+                         )
+                     )
+                   ORDER BY c.id"""
             ).fetchall()
         decisions = []
         for row in rows:

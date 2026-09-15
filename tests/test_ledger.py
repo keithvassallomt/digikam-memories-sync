@@ -447,6 +447,118 @@ class UpgradeTest(unittest.TestCase):
             second.close()
 
 
+class WhoCarriesADecisionTest(unittest.TestCase):
+    """A sync that can still apply its own decisions must keep them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = StateStore(Path(self.tmp.name) / "state.sqlite3")
+        self.run_id = self.state.create_run("all")
+        self.state.finish_run(self.run_id, "previewed", {})
+        self.state.save_conflicts(self.run_id, [{
+            "path": "a.jpg", "digikam_person": "Martina Muscat",
+            "nextcloud_person": "Eli Vassallo",
+            "digikam_rect": [0, 0, 1, 1], "nextcloud_rect": [0, 0, 1, 1],
+            "iou": 0.62, "nc_file_id": 1, "nc_detection_id": 2,
+            "digikam_image_id": 3, "digikam_tag_id": 4,
+        }])
+        self.conflict_id = self.state.open_conflicts()[0]["id"]
+
+    def tearDown(self):
+        self.state.close()
+        self.tmp.cleanup()
+
+    def resolve(self):
+        self.state.resolve_conflict(self.run_id, self.conflict_id, "digikam")
+
+    def test_a_waiting_preview_keeps_its_own_decisions(self):
+        self.resolve()
+        self.assertEqual(
+            self.state.pending_decisions(), [],
+            "nothing needs a follow-up run; this preview will carry it")
+        self.assertEqual(self.state.runs_carrying_decisions(), [self.run_id])
+
+    def test_the_decision_is_in_that_preview_plan(self):
+        self.resolve()
+        self.assertEqual(self.state.plan_conflicts(self.run_id)["total"], 1)
+
+    def test_a_decision_made_after_the_plan_was_written_needs_its_own_run(self):
+        self.state.initialize_apply(self.run_id, [{
+            "target": "memories", "operation": "assign_memories",
+            "path": "b.jpg", "person": "Gail", "rect": [0, 0, 1, 1],
+        }])
+        self.resolve()
+        self.assertEqual(
+            len(self.state.pending_decisions()), 1,
+            "the plan is frozen, so this needs carrying separately")
+        self.assertEqual(self.state.runs_carrying_decisions(), [])
+
+    def test_a_decision_on_a_finished_run_needs_its_own_run(self):
+        self.state.finish_run(self.run_id, "apply_failed", {})
+        self.resolve()
+        self.assertEqual(len(self.state.pending_decisions()), 1)
+        self.assertEqual(self.state.runs_carrying_decisions(), [])
+
+
+class DiscardingTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = StateStore(Path(self.tmp.name) / "state.sqlite3")
+
+    def tearDown(self):
+        self.state.close()
+        self.tmp.cleanup()
+
+    def previewed(self, mode="all"):
+        run_id = self.state.create_run(mode)
+        self.state.finish_run(run_id, "previewed", {})
+        self.state.append_preview_actions(run_id, [{"action": "assign"}])
+        return run_id
+
+    def test_discarding_a_full_preview_retires_the_older_ones(self):
+        older = self.previewed()
+        newer = self.previewed()
+        self.state.discard_preview(newer)
+        self.assertEqual(self.state.run(older)["status"], "discarded")
+        self.assertEqual(self.state.run(newer)["status"], "discarded")
+
+    def test_discarding_a_decisions_run_leaves_the_real_sync_alone(self):
+        big = self.previewed("all")
+        decisions = self.previewed("decisions")
+        self.state.discard_preview(decisions)
+        self.assertEqual(self.state.run(decisions)["status"], "discarded")
+        self.assertEqual(
+            self.state.run(big)["status"], "previewed",
+            "thousands of proposed changes must not vanish with a small follow-up")
+        self.assertEqual(len(self.state.preview_actions(big)), 1)
+
+    def test_a_full_preview_does_not_retire_a_decisions_run(self):
+        decisions = self.previewed("decisions")
+        big = self.previewed("all")
+        self.state.discard_preview(big)
+        self.assertEqual(self.state.run(decisions)["status"], "previewed")
+
+    def test_decisions_a_discarded_run_carried_are_asked_again(self):
+        run_id = self.previewed("all")
+        self.state.save_conflicts(run_id, [{
+            "path": "a.jpg", "digikam_person": "A", "nextcloud_person": "B",
+            "digikam_rect": [0, 0, 1, 1], "nextcloud_rect": [0, 0, 1, 1],
+            "iou": 0.6, "nc_file_id": 1, "nc_detection_id": 2,
+        }])
+        conflict_id = self.state.open_conflicts()[0]["id"]
+        self.state.resolve_conflict(run_id, conflict_id, "digikam")
+        carrier = self.state.create_run("decisions")
+        self.state.mark_decisions_folded([conflict_id], carrier)
+        self.state.finish_run(carrier, "previewed", {})
+
+        self.state.discard_preview(carrier)
+        with self.state.lock:
+            decided = self.state.conn.execute(
+                "SELECT decided_run_id FROM conflicts WHERE id = ?", (conflict_id,)
+            ).fetchone()[0]
+        self.assertIsNone(decided, "the decision is loose again, not lost")
+
+
 class DecisionsRunTest(unittest.TestCase):
     def test_settled_decisions_become_their_own_preview(self):
         decisions = [
