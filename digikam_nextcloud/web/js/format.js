@@ -35,11 +35,14 @@ export function when(value) {
 export function dayLabel(value) {
   const moment = parse(value);
   if (!moment) return '';
+  // Compare calendar days, not elapsed hours. Measuring from midnight tonight
+  // makes anything in the previous evening read as today.
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const days = Math.floor((startOfToday - moment) / 86400000);
-  if (days < 0) return 'today';
-  if (days === 0) return 'today';
+  const startOfThatDay = new Date(moment);
+  startOfThatDay.setHours(0, 0, 0, 0);
+  const days = Math.round((startOfToday - startOfThatDay) / 86400000);
+  if (days <= 0) return 'today';
   if (days === 1) return 'yesterday';
   if (days < 7) return moment.toLocaleDateString([], { weekday: 'long' });
   return moment.toLocaleDateString();

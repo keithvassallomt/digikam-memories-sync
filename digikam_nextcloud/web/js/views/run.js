@@ -22,6 +22,7 @@ export function create({ go, refresh }) {
   let runId = null;
   let timer = null;
   let closing = false;
+  let lastReview = null;
 
   element.append(body);
 
@@ -197,6 +198,19 @@ export function create({ go, refresh }) {
   }
 
   async function discard() {
+    // Checking both libraries takes minutes, and discarding throws that away
+    // along with any decisions already made. Worth one question.
+    const review = lastReview || {};
+    const parts = [];
+    if (review.total) parts.push(plural(review.total, 'proposed change', 'proposed changes'));
+    if (review.conflicts) parts.push(plural(review.conflicts, 'decision', 'decisions'));
+    const what = parts.length ? parts.join(' and ') : 'this preview';
+    const confirmed = window.confirm(
+      `Discard ${what}?\n\n`
+      + 'Nothing has been changed in either library. Face Sync will have to '
+      + 'check both of them again, which takes a few minutes.',
+    );
+    if (!confirmed) return;
     try {
       await api.post(`/api/runs/${runId}/discard`);
       await refresh();
@@ -235,6 +249,7 @@ export function create({ go, refresh }) {
           review = null;
         }
       }
+      lastReview = review;
       replace(body,
         button('← Activity', { class: 'button button-quiet button-small back', onClick: () => go('/activity') }),
         h('h1', {}, `Sync · ${when(run.started_at)}`),
