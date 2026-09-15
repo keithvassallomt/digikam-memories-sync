@@ -38,14 +38,86 @@ class FaceImportHTTPTests(unittest.TestCase):
 
         self.assertEqual(
             backend._probe_face_sync_app(),
-            {"create": True, "list": True, "assign": True, "confirmed": True},
+            {
+                "create": True, "list": True, "assign": True, "confirmed": True,
+                # An older app does not advertise these, so they stay off.
+                "changes": False, "status": False,
+            },
         )
 
         backend._request = lambda *args, **kwargs: (404, {}, b"")
         self.assertEqual(
             backend._probe_face_sync_app(),
-            {"create": False, "list": False, "assign": False, "confirmed": False},
+            {
+                "create": False, "list": False, "assign": False, "confirmed": False,
+                "changes": False, "status": False,
+            },
         )
+
+    def test_a_newer_app_advertises_change_detection(self):
+        backend = self.make_backend()
+        backend._request = lambda *args, **kwargs: (
+            200,
+            {},
+            json.dumps(
+                {
+                    "apiVersion": 5,
+                    "createFaceDetection": True,
+                    "listFaceDetections": True,
+                    "assignFaceDetection": True,
+                    "confirmedFaceImport": True,
+                    "changeFingerprint": True,
+                    "recognizeStatus": True,
+                }
+            ).encode(),
+        )
+        found = backend._probe_face_sync_app()
+        self.assertTrue(found["changes"])
+        self.assertTrue(found["status"])
+
+    def test_the_fingerprint_folds_the_parts_into_one_value(self):
+        backend = self.make_backend()
+        backend.supports_change_fingerprint = True
+        payload = {
+            "detections": {"count": 3, "checksum": "aaaa"},
+            "clusters": {"count": 2, "titles_hash": "bbbb"},
+        }
+        backend._request = lambda *args, **kwargs: (200, {}, json.dumps(payload).encode())
+        first = backend.change_fingerprint()
+        self.assertEqual(first, "3:aaaa:2:bbbb")
+
+        payload["detections"]["checksum"] = "cccc"
+        self.assertNotEqual(
+            backend.change_fingerprint(), first,
+            "a reassignment must change the fingerprint")
+
+    def test_an_old_app_cannot_report_changes(self):
+        backend = self.make_backend()
+        backend.supports_change_fingerprint = False
+        with self.assertRaises(NextcloudConnectionError):
+            backend.change_fingerprint()
+
+    def test_recognize_status_defaults_to_free_when_unsupported(self):
+        backend = self.make_backend()
+        backend.supports_recognize_status = False
+        self.assertFalse(
+            backend.recognize_busy(),
+            "an app that cannot say must not block syncing forever")
+
+    def test_recognize_status_is_read_when_supported(self):
+        backend = self.make_backend()
+        backend.supports_recognize_status = True
+        backend._request = lambda *args, **kwargs: (
+            200, {}, json.dumps({"recognize_busy": True, "jobs": ["ClassifyFacesJob"]}).encode(),
+        )
+        self.assertTrue(backend.recognize_busy())
+
+    def test_a_failing_request_is_reported_not_guessed(self):
+        backend = self.make_backend()
+        backend.supports_change_fingerprint = True
+        backend._request = lambda *args, **kwargs: (500, {}, b"")
+        with self.assertRaises(NextcloudConnectionError):
+            backend.change_fingerprint()
 
     def test_named_face_export_is_paginated_and_parsed(self):
         backend = self.make_backend()

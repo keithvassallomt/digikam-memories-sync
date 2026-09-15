@@ -108,13 +108,39 @@ class ChoosingWorkTest(unittest.TestCase):
         self.assertFalse(choose([], snapshot()).should_start)
 
 
+class FakeSettings:
+    def __init__(self, automation=None):
+        self._automation = automation or {"enabled": False}
+
+    def load(self):
+        return {"automation": dict(self._automation), "digikam_db": None}
+
+
 class FakeApp:
-    def __init__(self, state, digikam_running=False, paused=False):
+    def __init__(self, state, digikam_running=False, paused=False, automation=None):
         self.state = state
+        self.settings = FakeSettings(automation)
         self._digikam = digikam_running
         self._paused = paused
         self.resumed = []
         self.invalidated = 0
+        self.started = []
+        self.applied = []
+        self.busy = False
+
+    def recognize_busy(self):
+        return self.busy
+
+    def memories_fingerprint(self):
+        return None
+
+    def start_sync(self, payload):
+        self.started.append(payload)
+        return {"run_id": 99, "status": "previewing"}
+
+    def start_apply(self, run_id, payload):
+        self.applied.append((run_id, payload))
+        return {"run_id": run_id, "status": "applying"}
 
     def digikam_running(self):
         return self._digikam
@@ -209,6 +235,84 @@ class CoordinatorTest(unittest.TestCase):
             engine.tick()
         engine.tick()
         self.assertEqual(self.app.resumed, [run_id], "the next tick tried again")
+
+
+class StartingNewWorkTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = StateStore(Path(self.tmp.name) / "state.sqlite3")
+
+    def tearDown(self):
+        self.state.close()
+        self.tmp.cleanup()
+
+    def coordinator(self, **app_kwargs):
+        self.app = FakeApp(self.state, **app_kwargs)
+        engine = Coordinator(self.app)
+        engine._digikam_free_since = NOW - timedelta(minutes=10)
+        return engine
+
+    def due_trigger(self):
+        """A change seen long enough ago that its quiet period has passed."""
+        self.state.set_state("pending_trigger", {
+            "reasons": ["memories_changed"],
+            "first_change_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "start_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        })
+
+    def test_a_settled_change_starts_a_sync(self):
+        engine = self.coordinator(automation={"enabled": True})
+        self.due_trigger()
+        engine.tick()
+        self.assertEqual(len(self.app.started), 1)
+        self.assertEqual(self.app.started[0]["trigger"], "memories_changed")
+        self.assertIsNone(
+            self.state.get_state("pending_trigger"), "the trigger was used up")
+
+    def test_a_busy_recognize_holds_the_sync_but_keeps_the_trigger(self):
+        engine = self.coordinator(automation={"enabled": True})
+        self.app.busy = True
+        self.due_trigger()
+        engine.tick()
+        self.assertEqual(self.app.started, [])
+        self.assertIsNotNone(
+            self.state.get_state("pending_trigger"),
+            "the change must not be forgotten while Recognize works")
+
+    def test_automation_off_means_nothing_starts(self):
+        engine = self.coordinator(automation={"enabled": False})
+        self.due_trigger()
+        engine.tick()
+        self.assertEqual(self.app.started, [])
+
+    def test_a_pause_stops_new_work_as_well_as_resumed_work(self):
+        engine = self.coordinator(automation={"enabled": True}, paused=True)
+        self.due_trigger()
+        engine.tick()
+        self.assertEqual(self.app.started, [])
+
+    def test_a_preview_told_to_apply_itself_is_applied(self):
+        engine = self.coordinator(automation={"enabled": True})
+        run_id = self.state.create_run("all", auto_apply=True)
+        self.state.finish_run(run_id, "previewed", {})
+        engine.tick()
+        self.assertEqual(self.app.applied, [(run_id, {"automatic": True})])
+
+    def test_a_preview_awaiting_a_person_is_left_alone(self):
+        engine = self.coordinator(automation={"enabled": True})
+        run_id = self.state.create_run("all", auto_apply=False)
+        self.state.finish_run(run_id, "previewed", {})
+        engine.tick()
+        self.assertEqual(self.app.applied, [])
+
+    def test_resuming_existing_work_comes_before_starting_new_work(self):
+        engine = self.coordinator(automation={"enabled": True})
+        run_id = self.state.create_run("all")
+        self.state.set_waiting(run_id, "resume")
+        self.due_trigger()
+        engine.tick()
+        self.assertEqual(self.app.resumed, [run_id])
+        self.assertEqual(self.app.started, [], "one job at a time")
 
 
 class RecoveryTest(unittest.TestCase):

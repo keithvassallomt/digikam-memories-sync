@@ -485,6 +485,10 @@ Gates are evaluated per action target, not per job. A job whose remaining work i
 
 A change trigger does not start a job. It sets `pending_trigger_at = now + quiet_period` (default 10 min) and records the reason. Further changes push it out again, but never past `first_change_at + 60 min`, so a library that is edited all afternoon still syncs hourly. When `pending_trigger_at` passes and gates allow, one job starts with all accumulated reasons.
 
+"Further changes" means changes since the **previous poll**, not since the last sync. The watcher keeps both, because a change that is already waiting would otherwise be re-noticed on every poll and keep pushing its own start time away, and the sync would never happen.
+
+A trigger that comes due but is refused by a gate stays standing rather than being dropped, so the sync happens as soon as the gate opens. It is consumed only once a run has actually started.
+
 While a job is running, new triggers are recorded and evaluated after it finishes, so a change made during a sync is picked up by the next one rather than lost.
 
 ### 6.4 Job state machine
@@ -669,12 +673,12 @@ Two routes, both `NoAdminRequired`, both read-only, both under the existing `api
 
 ```json
 {
-  "detections": { "count": 13713, "max_id": 918273, "checksum": "a1b2…" },
+  "detections": { "count": 13713, "checksum": "a1b2…" },
   "clusters":   { "count": 212,   "titles_hash": "c3d4…" }
 }
 ```
 
-`checksum` is a hash over `(id, cluster_id)` for the user's detections in named clusters, computed with one aggregate query. Any assignment, unassignment or new detection changes it. `titles_hash` catches renames.
+`checksum` is a SHA-256 over `(id, cluster_id)` for the user's detections in named clusters. An aggregate sum would have been cheaper but can collide when two faces swap people, so the pairs are read and hashed instead. Only two integers per named face are read, which keeps it cheap enough to poll. Any assignment, unassignment or new detection changes it, and `titles_hash` catches renames.
 
 **`GET /api/v1/status`**
 
@@ -933,6 +937,11 @@ Each batch writes its findings and its cursor in one transaction, so a crash bet
 Done when: killing the service mid-preview and mid-apply both resume correctly; opening digiKam mid-apply defers cleanly and closing it completes the run.
 
 **M5. Triggers.** digiKam fingerprint and mtime pre-check, companion `changes` and `status` endpoints and client, Recognize gate, quiet period, fallback interval, automation toggle wired end to end, first-run automation step.
+
+Applying a finished preview without asking is the coordinator's job, not the preview's. A preview thread cannot start an apply, because it still holds the job slot.
+
+Measured on the development library: the digiKam fingerprint takes 10 ms over 13,713 face regions, and a poll where the modification time has not moved takes 0.1 ms.
+
 Done when: a face renamed in digiKam is reflected in Memories within quiet period + one check interval of closing digiKam, with no clicks.
 
 **M6. Polish.** Operating-system notifications per platform for the UI-closed case, retention jobs, run and log tail in run detail, `--once` smoke flag, README and architecture doc updates, HTML prototype replaced by screenshots.
@@ -942,7 +951,7 @@ Done when: a face renamed in digiKam is reflected in Memories within quiet perio
 ## 17. Risks and open points
 
 - **Ledger bootstrap.** The upgrade seeds the ledger from links phase 1 already wrote, so only faces Face Sync never touched can still surface as a conflict once. That is a much smaller set than first assumed, and the risk is correspondingly lower.
-- **Fingerprint checksum collisions** on the Memories side are theoretically possible. The fallback interval bounds the damage to one day.
+- **Fingerprint collisions** are no longer a practical concern on either side: both fingerprints hash the underlying rows rather than summing them. The fallback interval still bounds any miss to one day.
 - **Recognize busy detection** depends on `oc_jobs.reserved_at` semantics, which are stable but undocumented. If Nextcloud changes them the gate degrades to "idle", which is the phase 1 behaviour.
 - **digiKam on another machine** writing to a shared database is invisible to the process probe. The write-lock probe catches an active transaction only. Documented, not solved.
 - **Preview cost per trigger.** A full preview on this library takes minutes. Person-scoped automatic runs, driven by which person's faces changed, would be a phase 3 optimisation once the fingerprints record per-person deltas.

@@ -491,6 +491,50 @@ class AppService:
             thread.start()
         return {"run_id": run_id, "status": "previewing"}
 
+    def _short_backend(self) -> Any:
+        """A connection for one quick question, or None when not set up."""
+        settings = self.settings.load()
+        user_id = str(settings.get("nc_user") or "")
+        password = self.settings.password(user_id)
+        if not settings.get("nextcloud_url") or not user_id or not password:
+            return None
+        return self.backend_factory(
+            str(settings["nextcloud_url"]), user_id, password, http_workers=1
+        )
+
+    def memories_fingerprint(self) -> str | None:
+        """A value that changes when a named face moves in Memories.
+
+        None means the question could not be asked, which is different from
+        "nothing changed" and must not be treated as an answer.
+        """
+        backend = self._short_backend()
+        if backend is None:
+            return None
+        try:
+            if not getattr(backend, "supports_change_fingerprint", False):
+                return None
+            return backend.change_fingerprint()
+        finally:
+            backend.close()
+
+    def recognize_busy(self) -> bool:
+        """Whether Recognize is working through its own queue."""
+
+        def probe() -> bool:
+            backend = self._short_backend()
+            if backend is None:
+                return False
+            try:
+                return bool(backend.recognize_busy())
+            except Exception as error:
+                LOG.debug("Could not read the Recognize status: %s", error)
+                return False
+            finally:
+                backend.close()
+
+        return bool(self._cached("recognize_busy", 300.0, probe))
+
     def invalidate_probes(self) -> None:
         """Forget cached answers. Used after a sleep, when they may be stale."""
         self._cache.clear()

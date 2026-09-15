@@ -310,6 +310,16 @@ class StateStore:
             )
             self.conn.commit()
 
+    def auto_apply_candidate(self) -> int | None:
+        """The newest finished preview that was told to apply itself."""
+        with self.lock:
+            row = self.conn.execute(
+                """SELECT id FROM runs
+                   WHERE status = 'previewed' AND auto_apply = 1
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+        return int(row[0]) if row is not None else None
+
     def runs_awaiting_work(self) -> list[dict[str, Any]]:
         """Runs the coordinator should pick up, oldest first."""
         with self.lock:

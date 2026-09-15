@@ -9,5 +9,7 @@ return [
 		['name' => 'face_import#assign', 'url' => '/api/v1/face-assign', 'verb' => 'POST'],
 		['name' => 'face_export#people', 'url' => '/api/v1/people', 'verb' => 'GET'],
 		['name' => 'face_export#list', 'url' => '/api/v1/faces', 'verb' => 'GET'],
+		['name' => 'changes#fingerprint', 'url' => '/api/v1/changes', 'verb' => 'GET'],
+		['name' => 'changes#status', 'url' => '/api/v1/status', 'verb' => 'GET'],
 	],
 ];

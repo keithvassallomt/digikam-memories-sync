@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from .triggers import TriggerWatcher
+
 LOG = logging.getLogger(__name__)
 
 TICK_SECONDS = 10.0
@@ -31,6 +33,7 @@ WAITING_PAUSED = "paused"
 WAITING_JOB = "job_running"
 WAITING_ATTEMPT = "backoff"
 WAITING_RESUME = "resume"
+WAITING_RECOGNIZE = "recognize"
 
 
 def backoff_delay(attempts: int) -> timedelta:
@@ -140,8 +143,10 @@ class Coordinator:
         self._digikam_free_since: datetime | None = None
         self._last_monotonic = monotonic()
         self._last_wall = wall()
+        self.watcher = TriggerWatcher(app)
         self.slept = False
         self.ticks = 0
+        self.started_by_trigger: list[str] = []
 
     # ------------------------------------------------------------ lifecycle
 
@@ -205,14 +210,71 @@ class Coordinator:
             LOG.info("Resumed after sleep; rechecking before continuing")
             self.app.invalidate_probes()
 
+        snapshot = self.snapshot()
         runs = self.app.state.runs_awaiting_work()
-        if not runs:
-            return Decision()
-        decision = choose(runs, self.snapshot())
+        decision = choose(runs, snapshot) if runs else Decision()
         if decision.should_start:
             LOG.info("Continuing run %s", decision.run_id)
             try:
                 self.app.resume_run(decision.run_id)
             except Exception:
                 LOG.exception("Could not continue run %s", decision.run_id)
+            return decision
+
+        # Work already under way comes first. Only when nothing is waiting does
+        # the coordinator consider starting something new.
+        if not snapshot.job_running:
+            if self.consider_auto_apply(snapshot):
+                return decision
+            self.consider_trigger(snapshot)
         return decision
+
+    def consider_auto_apply(self, snapshot: Snapshot) -> bool:
+        """Apply a finished preview that was asked to apply itself.
+
+        digiKam does not gate this: the apply holds its own half back and gets
+        on with the Memories half.
+        """
+        if snapshot.paused:
+            return False
+        run_id = self.app.state.auto_apply_candidate()
+        if run_id is None:
+            return False
+        try:
+            self.app.start_apply(run_id, {"automatic": True})
+            LOG.info("Applying run %s without asking, as configured", run_id)
+            return True
+        except ValueError as error:
+            LOG.debug("Run %s is not ready to apply itself: %s", run_id, error)
+        except Exception:
+            LOG.exception("Could not apply run %s", run_id)
+        return False
+
+    def consider_trigger(self, snapshot: Snapshot) -> str | None:
+        """Start a sync when a library has changed and settled down."""
+        if snapshot.paused:
+            return None
+        try:
+            reason = self.watcher.poll(
+                snapshot.now, digikam_running=snapshot.digikam_running
+            )
+        except Exception:
+            LOG.exception("Could not check for changes")
+            return None
+        if reason is None:
+            return None
+        if self.app.recognize_busy():
+            # The trigger is deliberately left standing, so the sync happens
+            # as soon as Recognize is done rather than being forgotten.
+            LOG.info("Recognize is busy; holding the %s sync", reason)
+            return None
+        try:
+            started = self.app.start_sync({"scope": "all", "trigger": reason})
+        except Exception:
+            LOG.exception("Could not start the %s sync", reason)
+            return None
+        self.watcher.consume()
+        self.watcher.stash_for_run(int(started["run_id"]))
+        self.started_by_trigger.append(reason)
+        LOG.info("Started run %s because %s", started["run_id"], reason)
+        return reason

@@ -33,6 +33,16 @@ LOG = logging.getLogger(__name__)
 
 FACE_SYNC_APP_INSTALL_URL = "https://keithvassallo.com"
 
+# What a missing or unreachable companion app looks like.
+NO_CAPABILITIES = {
+    "create": False,
+    "list": False,
+    "assign": False,
+    "confirmed": False,
+    "changes": False,
+    "status": False,
+}
+
 
 class NextcloudConnectionError(RuntimeError):
     """The supplied Nextcloud connection cannot be used."""
@@ -259,6 +269,8 @@ class NextcloudHTTP:
         self.supports_export = capabilities["list"]
         self.supports_assign = capabilities["assign"]
         self.supports_confirmed_insert = capabilities["confirmed"]
+        self.supports_change_fingerprint = capabilities["changes"]
+        self.supports_recognize_status = capabilities["status"]
         self.generates_face_vectors = self.supports_insert
 
     def _probe_recognize_installation(self) -> bool:
@@ -312,13 +324,15 @@ class NextcloudHTTP:
             )
             if status != 200:
                 LOG.debug("Recognize face-import API unavailable (HTTP %s)", status)
-                return {"create": False, "list": False, "assign": False, "confirmed": False}
+                return dict(NO_CAPABILITIES)
             payload = json.loads(raw.decode("utf-8"))
             capabilities = {
                 "create": payload.get("createFaceDetection") is True,
                 "list": payload.get("listFaceDetections") is True,
                 "assign": payload.get("assignFaceDetection") is True,
                 "confirmed": payload.get("confirmedFaceImport") is True,
+                "changes": payload.get("changeFingerprint") is True,
+                "status": payload.get("recognizeStatus") is True,
             }
             if capabilities["create"]:
                 LOG.info("Recognize face-import API available")
@@ -327,10 +341,65 @@ class NextcloudHTTP:
             return capabilities
         except Exception as e:
             LOG.debug("Could not probe Face Sync companion API: %s", e)
-            return {"create": False, "list": False, "assign": False, "confirmed": False}
+            return dict(NO_CAPABILITIES)
 
     def face_list_url(self) -> str:
         return "index.php/apps/digikam_face_sync/api/v1/faces"
+
+    def changes_url(self) -> str:
+        return "index.php/apps/digikam_face_sync/api/v1/changes"
+
+    def recognize_status_url(self) -> str:
+        return "index.php/apps/digikam_face_sync/api/v1/status"
+
+    def _json_request(self, path: str, description: str) -> dict[str, Any]:
+        status, _, raw = self._request(
+            "GET",
+            path,
+            headers={"Accept": "application/json", "OCS-APIRequest": "true"},
+        )
+        if status != 200:
+            raise NextcloudConnectionError(f"Could not read {description} (HTTP {status}).")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as error:
+            raise NextcloudConnectionError(f"The {description} response was invalid.") from error
+        if not isinstance(payload, dict):
+            raise NextcloudConnectionError(f"The {description} response was invalid.")
+        return payload
+
+    def change_fingerprint(self) -> str:
+        """A short value that changes whenever a named face moves.
+
+        Comparing it costs one request, which is what makes polling for
+        changes cheap enough to do every few minutes.
+        """
+        if not self.supports_change_fingerprint:
+            raise NextcloudConnectionError(
+                "The Nextcloud Face Sync app must be updated before changes "
+                "can be detected."
+            )
+        payload = self._json_request(self.changes_url(), "the Memories change fingerprint")
+        detections = payload.get("detections") or {}
+        clusters = payload.get("clusters") or {}
+        return ":".join(
+            str(part)
+            for part in (
+                detections.get("count", 0),
+                detections.get("checksum", ""),
+                clusters.get("count", 0),
+                clusters.get("titles_hash", ""),
+            )
+        )
+
+    def recognize_busy(self) -> bool:
+        """Whether Recognize is working through its own queue right now."""
+        if not self.supports_recognize_status:
+            # An older companion app cannot say, so assume it is free. Being
+            # wrong here only means starting during a Recognize run.
+            return False
+        payload = self._json_request(self.recognize_status_url(), "the Recognize status")
+        return payload.get("recognize_busy") is True
 
     def people_list_url(self) -> str:
         return "index.php/apps/digikam_face_sync/api/v1/people"
