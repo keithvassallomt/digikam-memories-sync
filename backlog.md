@@ -75,6 +75,50 @@ situation that makes this worth having.
 It writes names in bulk with no review step, so it wants the ledger and the
 review screens proven first. Phase 2 gives both.
 
+## Bulk retry for rejected faces
+
+The review screen already has "keep all remaining rejected faces where they
+are". It needs the opposite: add all remaining using their digiKam boxes.
+
+One click would mark every remaining rejected face as a confirmed digiKam box,
+leave its rectangle alone, and put it back in the queue. Applying then sends
+`confirmed: true`, which the companion app treats as "this rectangle is already
+the detection": it skips Recognize's face detector and computes the descriptor
+straight from the box using the same landmark alignment and recognition model
+Recognize uses afterwards.
+
+It would not adjust any box, would not bypass the overlapping-face guard, and
+would not guarantee success, since landmark alignment can still fail. Anything
+that fails again comes back to the queue.
+
+This is distinct from trusting a library. A bulk retry is a decision about
+faces already rejected, taken after looking at them. Trusting digiKam is a
+standing policy applied before anything is rejected.
+
+### What the first full sync showed
+
+7,977 changes applied in about four hours, roughly two seconds each.
+
+| | |
+|---|---|
+| Applied | 7,706 |
+| Rejected by Recognize's detector | 264 |
+| Caught by the overlap guard | 2 |
+
+The rejected boxes were six times smaller than the accepted ones by area, and
+three quarters of them under a quarter of the typical accepted size. They are
+small faces in group shots, spread over 48 people.
+
+Reviewing them one at a time showed the digiKam boxes were right in the
+overwhelming majority, and the faces clear. That is 271 individual clicks to
+reach a conclusion that was the same every time, which is the argument for the
+bulk action.
+
+It also strengthens the case for making `confirmed` the default on every
+insert, rather than only on a retry. The counter-argument stands: it hands
+Recognize descriptors from boxes its own detector rejected, which may weaken
+its clustering. Worth measuring before changing the default.
+
 ## Related: the Memories side is much sparser than digiKam
 
 Measured on the development library, sampling 80 photos that carry faces:

@@ -87,9 +87,15 @@ export function create({ go, refresh }) {
           h('span', {}, label), h('strong', {}, count(summary[key]))))));
   }
 
+  // A run can still have work waiting after a partial apply: faces you
+  // reviewed, or a digiKam half held back. Those need the same button.
+  const CAN_APPLY = ['previewed', 'apply_failed', 'deferred', 'waiting'];
+
   function applyCard(run, review) {
-    if (run.status !== 'previewed') return null;
+    if (!CAN_APPLY.includes(run.status)) return null;
+    const fresh = run.status === 'previewed';
     if (!review || !review.total) {
+      if (!fresh) return null;
       return card(h('h3', {}, 'Nothing to apply'),
         h('p', { class: 'muted' }, 'Both libraries already agree about these faces.'),
         h('div', { class: 'actions' },
@@ -115,7 +121,9 @@ export function create({ go, refresh }) {
           apply.disabled = !allowed();
         }
       },
-    }, `Apply ${plural(review.total, 'change', 'changes')}`);
+    }, fresh
+      ? `Apply ${plural(review.total, 'change', 'changes')}`
+      : `Apply ${plural(review.total, 'reviewed change', 'reviewed changes')}`);
 
     const closeButton = h('button', {
       type: 'button', class: 'button',
@@ -139,13 +147,19 @@ export function create({ go, refresh }) {
     }, 'Close digiKam for me');
 
     return h('div', {},
-      card(
-        h('div', { class: 'row-start' },
-          h('span', { class: 'iconbox', 'aria-hidden': 'true' }, '✓'),
-          h('div', {},
-            h('h3', {}, 'A digiKam backup is made automatically'),
+      fresh
+        ? card(
+            h('div', { class: 'row-start' },
+              h('span', { class: 'iconbox', 'aria-hidden': 'true' }, '✓'),
+              h('div', {},
+                h('h3', {}, 'A digiKam backup is made automatically'),
+                h('div', { class: 'muted' },
+                  'Face Sync copies the database before the first local change.'))))
+        : card(
+            h('h3', {}, `${plural(review.total, 'change is', 'changes are')} still waiting`),
             h('div', { class: 'muted' },
-              'Face Sync copies the database before the first local change.')))),
+              'These are the ones you reviewed, plus anything held back earlier. '
+              + 'Applying again picks up only what is left.')),
       needsClose
         ? card(
             h('h3', {}, 'Close digiKam before continuing'),
@@ -158,7 +172,7 @@ export function create({ go, refresh }) {
         : null,
       message,
       h('div', { class: 'actions' },
-        button('Discard this preview', { onClick: () => discard() }),
+        fresh ? button('Discard this preview', { onClick: () => discard() }) : null,
         apply));
   }
 
