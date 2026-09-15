@@ -16,8 +16,10 @@ PAUSED = "paused"
 OFF = "off"
 IN_SYNC = "in_sync"
 
-# Runs that are still doing something.
-ACTIVE_STATUSES = frozenset({"queued", "previewing", "applying"})
+# Runs that are still doing something, including ones waiting to resume.
+ACTIVE_STATUSES = frozenset({"queued", "waiting", "previewing", "applying"})
+# A run holding digiKam-side changes back until digiKam closes.
+DEFERRED = "deferred"
 # Runs that have produced changes nobody has applied yet.
 READY_STATUSES = frozenset({"previewed"})
 
@@ -39,6 +41,8 @@ def choose_state(
     if not configured:
         return SETUP
     status = str(run["status"]) if run else ""
+    if status == DEFERRED:
+        return WAITING_DIGIKAM
     if status in ACTIVE_STATUSES:
         return SYNCING
     if attention_total:

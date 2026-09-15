@@ -117,6 +117,19 @@ CREATE TABLE IF NOT EXISTS service_state (
     value_json TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS run_checkpoints (
+    run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL,
+    cursor_json TEXT NOT NULL DEFAULT '{}',
+    counters_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS preview_actions (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    action_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS preview_actions_run ON preview_actions(run_id);
 """
 
 # Columns added after the first release. Existing databases are upgraded in
@@ -128,6 +141,9 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "waiting_reason": "TEXT",
         "next_attempt_at": "TEXT",
         "attempts": "INTEGER NOT NULL DEFAULT 0",
+        # The person a scoped run was for, so a resumed run covers the same
+        # ground rather than quietly widening to the whole library.
+        "person": "TEXT",
     },
     "notifications": {
         "channel": "TEXT",
@@ -142,6 +158,9 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "identity_key": "TEXT",
         # The run whose plan already carries this decision, if any.
         "decided_run_id": "INTEGER",
+        # The last run that reported this disagreement. Lets a full run close
+        # the ones it no longer sees, without holding them all in memory.
+        "last_seen_run_id": "INTEGER",
     },
 }
 
@@ -237,6 +256,108 @@ class StateStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def recover_unfinished_runs(self) -> dict[str, int]:
+        """Re-queue everything the last service was in the middle of.
+
+        Nothing is thrown away. A preview resumes from its checkpoint, an
+        apply resumes from its journal, and both are marked as waiting to be
+        picked up rather than failed.
+        """
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT id, status FROM runs
+                   WHERE status IN ('queued', 'previewing', 'applying', 'deferred')"""
+            ).fetchall()
+            found = [(int(row["id"]), str(row["status"])) for row in rows]
+            if found:
+                run_ids = [run_id for run_id, _ in found]
+                placeholders = ",".join("?" * len(run_ids))
+                self.conn.execute(
+                    f"""UPDATE runs SET status = 'waiting', waiting_reason = 'resume',
+                        next_attempt_at = NULL, finished_at = NULL
+                        WHERE id IN ({placeholders})""",
+                    run_ids,
+                )
+                self.conn.execute(
+                    f"""UPDATE run_progress SET phase = 'waiting',
+                        error = 'Face Sync restarted. This will continue where it stopped.'
+                        WHERE run_id IN ({placeholders})""",
+                    run_ids,
+                )
+                self.conn.commit()
+        counts: dict[str, int] = {}
+        for _, status in found:
+            counts[status] = counts.get(status, 0) + 1
+        counts["total"] = len(found)
+        return counts
+
+    def resume_apply(self, run_id: int) -> None:
+        """Put a parked apply back to work without rebuilding its plan."""
+        with self.lock:
+            self.conn.execute(
+                """UPDATE runs SET status = 'applying', waiting_reason = NULL,
+                   next_attempt_at = NULL, finished_at = NULL WHERE id = ?""",
+                (run_id,),
+            )
+            self.conn.commit()
+
+    def resume_preview(self, run_id: int) -> None:
+        with self.lock:
+            self.conn.execute(
+                """UPDATE runs SET status = 'previewing', waiting_reason = NULL,
+                   next_attempt_at = NULL, finished_at = NULL WHERE id = ?""",
+                (run_id,),
+            )
+            self.conn.commit()
+
+    def runs_awaiting_work(self) -> list[dict[str, Any]]:
+        """Runs the coordinator should pick up, oldest first."""
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT id, mode, status, trigger, auto_apply, waiting_reason,
+                          next_attempt_at, attempts
+                   FROM runs WHERE status IN ('queued', 'waiting', 'deferred')
+                   ORDER BY id"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_waiting(
+        self,
+        run_id: int,
+        reason: str,
+        *,
+        next_attempt_at: str | None = None,
+        count_attempt: bool = False,
+    ) -> None:
+        """Park a run until something changes, without losing its progress."""
+        with self.lock:
+            self.conn.execute(
+                f"""UPDATE runs SET status = 'waiting', waiting_reason = ?,
+                    next_attempt_at = ?
+                    {', attempts = attempts + 1' if count_attempt else ''}
+                    WHERE id = ?""",
+                (reason, next_attempt_at, run_id),
+            )
+            self.conn.commit()
+
+    def set_deferred(self, run_id: int, reason: str) -> None:
+        with self.lock:
+            self.conn.execute(
+                """UPDATE runs SET status = 'deferred', waiting_reason = ?,
+                   next_attempt_at = NULL WHERE id = ?""",
+                (reason, run_id),
+            )
+            self.conn.commit()
+
+    def clear_waiting(self, run_id: int) -> None:
+        with self.lock:
+            self.conn.execute(
+                """UPDATE runs SET waiting_reason = NULL, next_attempt_at = NULL
+                   WHERE id = ?""",
+                (run_id,),
+            )
+            self.conn.commit()
+
     def recover_interrupted_applies(self) -> int:
         """Turn jobs abandoned by a stopped local service into resumable failures."""
         with self.lock:
@@ -301,13 +422,22 @@ class StateStore:
                    WHERE id <= ? AND status = 'previewed'""",
                 (run_id,),
             )
+            # The proposed changes go with it. Keeping them would leave rows
+            # nothing can ever apply.
+            self.conn.execute(
+                "DELETE FROM preview_actions WHERE run_id <= ?", (run_id,)
+            )
+            self.conn.execute(
+                "DELETE FROM run_checkpoints WHERE run_id <= ?", (run_id,)
+            )
             self.conn.commit()
 
     def latest_actionable_run(self) -> dict[str, Any] | None:
         with self.lock:
             row = self.conn.execute(
                 """SELECT id FROM runs
-                   WHERE status IN ('previewing', 'previewed', 'applying', 'apply_failed')
+                   WHERE status IN ('queued', 'waiting', 'previewing', 'previewed',
+                                    'applying', 'deferred', 'apply_failed')
                    ORDER BY id DESC LIMIT 1"""
             ).fetchone()
         return self.run(int(row[0])) if row is not None else None
@@ -319,12 +449,13 @@ class StateStore:
         *,
         trigger: str = "manual",
         auto_apply: bool = False,
+        person: str = "",
     ) -> int:
         with self.lock:
             cursor = self.conn.execute(
-                """INSERT INTO runs(profile_id, mode, status, trigger, auto_apply)
-                   VALUES (1, ?, ?, ?, ?)""",
-                (mode, status, trigger, int(auto_apply)),
+                """INSERT INTO runs(profile_id, mode, status, trigger, auto_apply, person)
+                   VALUES (1, ?, ?, ?, ?, ?)""",
+                (mode, status, trigger, int(auto_apply), person or None),
             )
             run_id = int(cursor.lastrowid)
             self.conn.execute(
@@ -793,13 +924,13 @@ class StateStore:
         seen: dict[str, dict[str, Any]] = {}
         for conflict in conflicts:
             seen.setdefault(self.conflict_identity(conflict), conflict)
-        added = refreshed = closed = 0
+        added = refreshed = 0
         with self.lock:
             rows = self.conn.execute(
                 """SELECT c.id, c.identity_key FROM conflicts c
                    JOIN runs r ON r.id = c.run_id
                    WHERE c.status = 'open'
-                     AND r.status IN ('previewed', 'applying', 'apply_failed')"""
+                     AND r.status IN ('previewed', 'applying', 'apply_failed', 'previewing')"""
             ).fetchall()
             open_keys = {str(row["identity_key"]): int(row["id"]) for row in rows}
 
@@ -807,35 +938,44 @@ class StateStore:
                 existing = open_keys.get(identity)
                 if existing is not None:
                     self.conn.execute(
-                        "UPDATE conflicts SET detail_json = ? WHERE id = ?",
-                        (json.dumps(conflict), existing),
+                        """UPDATE conflicts SET detail_json = ?, last_seen_run_id = ?
+                           WHERE id = ?""",
+                        (json.dumps(conflict), run_id, existing),
                     )
                     refreshed += 1
                     continue
                 self.conn.execute(
-                    """INSERT INTO conflicts(run_id, detail_json, identity_key)
-                       VALUES (?, ?, ?)""",
-                    (run_id, json.dumps(conflict), identity),
+                    """INSERT INTO conflicts(
+                           run_id, detail_json, identity_key, last_seen_run_id)
+                       VALUES (?, ?, ?, ?)""",
+                    (run_id, json.dumps(conflict), identity, run_id),
                 )
                 added += 1
-
-            if close_unseen:
-                gone = [
-                    conflict_id
-                    for identity, conflict_id in open_keys.items()
-                    if identity not in seen
-                ]
-                if gone:
-                    placeholders = ",".join("?" * len(gone))
-                    self.conn.execute(
-                        f"""UPDATE conflicts
-                            SET status = 'resolved', resolution = 'resolved_externally'
-                            WHERE id IN ({placeholders})""",
-                        gone,
-                    )
-                    closed = len(gone)
             self.conn.commit()
+        closed = self.close_conflicts_not_seen(run_id) if close_unseen else 0
         return {"added": added, "refreshed": refreshed, "closed": closed}
+
+    def close_conflicts_not_seen(self, run_id: int) -> int:
+        """Settle the questions a full run no longer asks.
+
+        Marking each conflict with the run that last reported it means this
+        works even when the run wrote them out in batches and kept none in
+        memory. Only call it after a run that looked at the whole library.
+        """
+        with self.lock:
+            cursor = self.conn.execute(
+                """UPDATE conflicts
+                   SET status = 'resolved', resolution = 'resolved_externally'
+                   WHERE status = 'open'
+                     AND (last_seen_run_id IS NULL OR last_seen_run_id != ?)
+                     AND run_id IN (
+                        SELECT id FROM runs
+                        WHERE status IN ('previewed', 'applying', 'apply_failed', 'previewing')
+                     )""",
+                (run_id,),
+            )
+            self.conn.commit()
+        return cursor.rowcount or 0
 
     def conflicts_for_run(self, run_id: int) -> dict[str, Any]:
         with self.lock:
@@ -1062,6 +1202,141 @@ class StateStore:
             )
             self.conn.commit()
         return cursor.rowcount or 0
+
+    # --------------------------------------------------------- checkpoints
+
+    def save_checkpoint(
+        self,
+        run_id: int,
+        phase: str,
+        cursor: dict[str, Any],
+        counters: dict[str, Any],
+    ) -> None:
+        """Record how far a preview has read, so it can pick up from here."""
+        with self.lock:
+            self.conn.execute(
+                """INSERT INTO run_checkpoints(run_id, phase, cursor_json, counters_json, updated_at)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(run_id) DO UPDATE SET
+                       phase = excluded.phase,
+                       cursor_json = excluded.cursor_json,
+                       counters_json = excluded.counters_json,
+                       updated_at = CURRENT_TIMESTAMP""",
+                (run_id, phase, json.dumps(cursor), json.dumps(counters)),
+            )
+            self.conn.commit()
+
+    def checkpoint(self, run_id: int) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM run_checkpoints WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "phase": str(row["phase"]),
+            "cursor": json.loads(row["cursor_json"] or "{}"),
+            "counters": json.loads(row["counters_json"] or "{}"),
+            "updated_at": row["updated_at"],
+        }
+
+    def clear_checkpoint(self, run_id: int) -> None:
+        with self.lock:
+            self.conn.execute("DELETE FROM run_checkpoints WHERE run_id = ?", (run_id,))
+            self.conn.commit()
+
+    def append_preview_actions(self, run_id: int, actions: list[dict[str, Any]]) -> int:
+        """Write a batch of proposed changes out, keeping memory flat."""
+        if not actions:
+            return 0
+        with self.lock:
+            self.conn.executemany(
+                "INSERT INTO preview_actions(run_id, action_json) VALUES (?, ?)",
+                [(run_id, json.dumps(action)) for action in actions],
+            )
+            self.conn.commit()
+        return len(actions)
+
+    def record_preview_batch(
+        self,
+        run_id: int,
+        actions: list[dict[str, Any]],
+        conflicts: list[dict[str, Any]],
+        phase: str,
+        cursor: dict[str, Any],
+        counters: dict[str, Any],
+    ) -> None:
+        """Write a batch's findings and its cursor together.
+
+        One transaction, because actions written without their cursor would be
+        written again by a resumed run, and counted twice.
+        """
+        with self.lock:
+            try:
+                self.conn.execute("BEGIN IMMEDIATE")
+                if actions:
+                    self.conn.executemany(
+                        "INSERT INTO preview_actions(run_id, action_json) VALUES (?, ?)",
+                        [(run_id, json.dumps(action)) for action in actions],
+                    )
+                for conflict in conflicts:
+                    identity = self.conflict_identity(conflict)
+                    existing = self.conn.execute(
+                        """SELECT c.id FROM conflicts c JOIN runs r ON r.id = c.run_id
+                           WHERE c.status = 'open' AND c.identity_key = ?
+                             AND r.status IN ('previewing', 'previewed', 'applying', 'apply_failed')
+                           LIMIT 1""",
+                        (identity,),
+                    ).fetchone()
+                    if existing is not None:
+                        self.conn.execute(
+                            """UPDATE conflicts SET detail_json = ?, last_seen_run_id = ?
+                               WHERE id = ?""",
+                            (json.dumps(conflict), run_id, int(existing[0])),
+                        )
+                    else:
+                        self.conn.execute(
+                            """INSERT INTO conflicts(
+                                   run_id, detail_json, identity_key, last_seen_run_id)
+                               VALUES (?, ?, ?, ?)""",
+                            (run_id, json.dumps(conflict), identity, run_id),
+                        )
+                self.conn.execute(
+                    """INSERT INTO run_checkpoints(
+                           run_id, phase, cursor_json, counters_json, updated_at)
+                       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                       ON CONFLICT(run_id) DO UPDATE SET
+                           phase = excluded.phase,
+                           cursor_json = excluded.cursor_json,
+                           counters_json = excluded.counters_json,
+                           updated_at = CURRENT_TIMESTAMP""",
+                    (run_id, phase, json.dumps(cursor), json.dumps(counters)),
+                )
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
+
+    def preview_actions(self, run_id: int) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT action_json FROM preview_actions WHERE run_id = ? ORDER BY id",
+                (run_id,),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def count_preview_actions(self, run_id: int) -> int:
+        with self.lock:
+            return int(
+                self.conn.execute(
+                    "SELECT COUNT(*) FROM preview_actions WHERE run_id = ?", (run_id,)
+                ).fetchone()[0]
+            )
+
+    def clear_preview_actions(self, run_id: int) -> None:
+        with self.lock:
+            self.conn.execute("DELETE FROM preview_actions WHERE run_id = ?", (run_id,))
+            self.conn.commit()
 
     # -------------------------------------------------------------- ledger
 

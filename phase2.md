@@ -533,6 +533,12 @@ Run statuses become: `queued, waiting, previewing, previewed, applying, deferred
 
 **Before digiKam writes start.** The digiKam gate is checked. If digiKam is running, all digiKam-target actions stay `pending` and the run enters `deferred`. Home says so. The Memories half proceeds.
 
+The backup is taken immediately before the first digiKam write that actually happens, not at the start of Apply. A run that defers its whole digiKam half therefore writes no backup file at all.
+
+The process probe is not the only check. Each digiKam action also confirms the database takes a write lock, which catches a digiKam running elsewhere against a shared library.
+
+Only a person clicking Apply is asked to close digiKam. An automatic run defers instead of refusing.
+
 **While digiKam writes are in progress.** The apply loop checks the process probe before every digiKam action (a `/proc` scan is about a millisecond; `psutil` similar). The instant digiKam appears, the current transaction completes atomically, no further digiKam action starts, and the run moves to `deferred`. A user launching digiKam mid-apply loses nothing and sees nothing odd: the writes that landed are complete rows that digiKam reads normally at startup.
 
 **When digiKam closes.** The probe sees the process disappear. Wait a settle period (15 s), then confirm the database is not locked by opening a write transaction and rolling it back. Resume pending digiKam actions. Each one re-verifies its target as today, so edits the user made in digiKam meanwhile turn individual actions into review items rather than overwrites.
@@ -556,6 +562,10 @@ A checkpoint row (`run_checkpoints`) records the phase, the cursor (last digiKam
 A resumed preview computed its halves at different moments. That is acceptable because Apply verifies every target before writing.
 
 **Apply checkpoint.** Already exists: `run_actions` with pending, applied, failed, ignored.
+
+**Streaming means conflicts cannot be held in memory either.** Each conflict row records the run that last reported it, so a full run closes the ones it no longer sees without needing them all at once. A scoped run never closes another person's.
+
+**A resumed run keeps its scope.** The person a scoped run was for is stored on the run, so resuming does not quietly widen it to the whole library.
 
 ### 7.3 Service restart and crash
 
@@ -917,6 +927,9 @@ A decision can now be made at any time, including after its own run has finished
 Done when: renaming a person in Memories produces automatic digiKam reassignments and zero conflicts on the next manual run; the same conflict never appears twice in Needs attention.
 
 **M4. Resumable runs and the coordinator.** Preview checkpoints and `preview_actions`, `recover_unfinished_runs`, coordinator thread with gates, digiKam deferral including mid-apply detection, backoff, sleep detection.
+
+Each batch writes its findings and its cursor in one transaction, so a crash between the two cannot make a resumed run count the same work twice.
+
 Done when: killing the service mid-preview and mid-apply both resume correctly; opening digiKam mid-apply defers cleanly and closing it completes the run.
 
 **M5. Triggers.** digiKam fingerprint and mtime pre-check, companion `changes` and `status` endpoints and client, Recognize gate, quiet period, fallback interval, automation toggle wired end to end, first-run automation step.

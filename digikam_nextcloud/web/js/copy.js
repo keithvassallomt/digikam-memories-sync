@@ -20,6 +20,8 @@ export function trigger(name) {
 
 export const PHASES = {
   starting: 'Getting ready',
+  waiting: 'Waiting to continue',
+  deferred: 'Waiting for digiKam to close',
   loading_memories: 'Reading faces from Memories',
   scanning_digikam: 'Checking digiKam photos',
   scanning_memories: 'Checking Memories photos',
@@ -59,6 +61,12 @@ export function outcome(run) {
   switch (run.status) {
     case 'queued':
       return 'Waiting to start';
+    case 'waiting':
+      return run.waiting_reason === 'connection'
+        ? "Couldn't reach Nextcloud, will retry"
+        : 'Waiting to continue';
+    case 'deferred':
+      return `${plural((run.apply || {}).pending || 0, 'change is', 'changes are')} waiting for digiKam`;
     case 'previewing':
       return 'Checking both libraries';
     case 'applying':
@@ -130,8 +138,12 @@ export function subline(status) {
     case 'attention':
       return 'Everything else keeps syncing around them.';
     case 'waiting_digikam': {
-      const summary = (status.run || {}).summary || {};
-      return `${plural(digikamChangeCount(summary), 'change', 'changes')} for digiKam will be applied when you quit digiKam.`;
+      const run = status.run || {};
+      const pending = (run.apply || {}).pending;
+      const waiting = pending === undefined || pending === null
+        ? digikamChangeCount(run.summary || {})
+        : pending;
+      return `${plural(waiting, 'change', 'changes')} for digiKam will be applied when you quit digiKam.`;
     }
     case 'ready': {
       const run = status.run || {};
@@ -153,9 +165,11 @@ export function subline(status) {
 /** A quieter third line, only where there is something worth adding. */
 export function detail(status) {
   if (status.state === 'waiting_digikam') {
+    const applied = ((status.run || {}).apply || {}).applied;
+    if (applied) return `${plural(applied, 'change', 'changes')} were applied already.`;
     const summary = (status.run || {}).summary || {};
     const memories = Number(summary.assigned || 0) + Number(summary.inserted || 0);
-    if (memories) return `${plural(memories, 'change', 'changes')} for Memories were applied already.`;
+    if (memories) return `${plural(memories, 'change', 'changes')} for Memories are ready.`;
   }
   if (status.state === 'ready' && !status.automation.apply_automatically) {
     return 'Automatic sync is on, but “Apply changes without asking” is off.';

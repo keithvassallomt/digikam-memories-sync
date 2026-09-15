@@ -167,6 +167,10 @@ class SyncReport:
     warnings: list[str] = field(default_factory=list)
     # Conflicts counted in earlier session segments (detail lists not restored)
     prior_conflicts: int = 0
+    # Actions recorded across the whole run, including any already written out
+    # to storage. The detail cap counts these, not the list in memory, so
+    # draining a batch to disk does not quietly raise the cap.
+    actions_total: int = 0
 
     @property
     def conflict_count(self) -> int:

@@ -16,9 +16,12 @@ from .digikam import DigikamDB
 from .digikam_writer import (
     DigikamWriter,
     create_sqlite_backup,
+    digikam_database_is_free,
     digikam_is_running,
     terminate_digikam,
 )
+from . import checkpoint as checkpoint_module
+from . import coordinator as coordinator_module
 from . import notify, status as status_module
 from .apply import (
     ApplyExecutor,
@@ -26,7 +29,9 @@ from .apply import (
     conflict_preview_actions,
     plan_summary,
 )
+from .checkpoint import StateCheckpoint
 from .ledger import StateLedger
+from .models import SyncReport
 from .nextcloud_http import NextcloudConnectionError, NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
 from .settings import SettingsStore
@@ -473,7 +478,9 @@ class AppService:
             active = [run_id for run_id, thread in self._jobs.items() if thread.is_alive()]
             if active:
                 raise ValueError(f"Preview {active[0]} is already running.")
-            run_id = self.state.create_run(scope, trigger=trigger, auto_apply=auto_apply)
+            run_id = self.state.create_run(
+                scope, trigger=trigger, auto_apply=auto_apply, person=person
+            )
             thread = threading.Thread(
                 target=self._preview_job,
                 args=(run_id, {"scope": scope, "person": person}),
@@ -483,6 +490,62 @@ class AppService:
             self._jobs[run_id] = thread
             thread.start()
         return {"run_id": run_id, "status": "previewing"}
+
+    def invalidate_probes(self) -> None:
+        """Forget cached answers. Used after a sleep, when they may be stale."""
+        self._cache.clear()
+
+    def resume_run(self, run_id: int) -> dict[str, Any]:
+        """Continue a run the coordinator has decided may proceed.
+
+        A run with a journal resumes its apply; anything else resumes its
+        preview, from the checkpoint if it has one.
+        """
+        run = self.state.run(run_id)
+        if run is None:
+            raise ValueError("Run not found.")
+        with self._job_lock:
+            if any(thread.is_alive() for thread in self._jobs.values()):
+                raise ValueError("Another Face Sync job is already running.")
+            journalled = self.state.apply_counts(run_id)["total"] > 0
+            if journalled:
+                self.state.resume_apply(run_id)
+                target, name = self._apply_job, f"face-sync-apply-{run_id}"
+                arguments: tuple[Any, ...] = (run_id,)
+            else:
+                self.state.resume_preview(run_id)
+                target, name = self._preview_job, f"face-sync-preview-{run_id}"
+                arguments = (
+                    run_id,
+                    {"scope": str(run.get("mode") or "all"), "person": run.get("person") or ""},
+                )
+            thread = threading.Thread(target=target, args=arguments, name=name, daemon=True)
+            self._jobs[run_id] = thread
+            thread.start()
+        return {"run_id": run_id, "resumed": "apply" if journalled else "preview"}
+
+    def _park_for_retry(self, run_id: int, error: Exception) -> bool:
+        """Park a run that failed for a reason retrying might fix.
+
+        Returns True when the run was parked rather than failed, so the caller
+        knows not to announce a failure.
+        """
+        if not is_systemic_apply_failure(error):
+            return False
+        run = self.state.run(run_id) or {}
+        attempts = int(run.get("attempts") or 0)
+        when = coordinator_module.next_attempt_at(attempts)
+        self.state.set_waiting(
+            run_id,
+            coordinator_module.WAITING_CONNECTION,
+            next_attempt_at=when,
+            count_attempt=True,
+        )
+        LOG.warning(
+            "Run %s stopped on a connection problem; next attempt at %s (%s)",
+            run_id, when, error,
+        )
+        return True
 
     def active_run_id(self) -> int | None:
         with self._job_lock:
@@ -549,7 +612,9 @@ class AppService:
         run = self.state.run(run_id)
         if run is None or run.get("result") is None:
             raise ValueError("Preview run not found.")
-        if run["status"] not in {"previewed", "applying", "apply_failed", "applied"}:
+        if run["status"] not in {
+            "previewed", "applying", "deferred", "waiting", "apply_failed", "applied"
+        }:
             raise ValueError("This preview is not ready to apply.")
         conflicts = self.state.conflicts_for_run(run_id)
         plan = build_apply_plan(run["result"], self.state.plan_conflicts(run_id))
@@ -582,7 +647,9 @@ class AppService:
             return self.preview_status(run_id)
         if review["total"] == 0:
             raise ValueError("There are no changes to apply.")
-        if review["requires_digikam_closed"]:
+        # An automatic run defers the digiKam half silently. Only someone
+        # clicking Apply is asked to close digiKam first.
+        if review["requires_digikam_closed"] and not payload.get("automatic"):
             if payload.get("digikam_closed") is not True:
                 raise ValueError("Confirm that digiKam is closed before applying changes.")
             if digikam_is_running():
@@ -623,14 +690,22 @@ class AppService:
                 raise ValueError("The saved digiKam database is unavailable.")
             pending = self.state.pending_apply_actions(run_id)
             counts = self.state.apply_counts(run_id)
-            if any(item["action"]["target"] == "digikam" for item in pending):
-                backup = self.state.apply_backup(run_id)
-                if not backup:
-                    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                    destination = self.settings.root / "backups" / f"digikam4-run-{run_id}-{timestamp}.db"
-                    self.state.update_progress(run_id, "backing_up_digikam", counts["applied"], counts["total"], counts)
-                    backup = str(create_sqlite_backup(database, destination))
-                    self.state.set_apply_backup(run_id, backup)
+
+            def digikam_is_free() -> bool:
+                """Fresh enough to stop within a second of digiKam opening."""
+                return not self._cached("digikam_busy", 1.0, digikam_is_running)
+
+            def ensure_backup() -> None:
+                if self.state.apply_backup(run_id):
+                    return
+                timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                destination = (
+                    self.settings.root / "backups" / f"digikam4-run-{run_id}-{timestamp}.db"
+                )
+                self.state.update_progress(
+                    run_id, "backing_up_digikam", counts["applied"], counts["total"], counts
+                )
+                self.state.set_apply_backup(run_id, str(create_sqlite_backup(database, destination)))
 
             if any(item["action"]["target"] == "memories" for item in pending):
                 user_id = str(settings["nc_user"])
@@ -651,8 +726,21 @@ class AppService:
                 nextcloud_photos_path=str(settings.get("nc_photos_path", "Photos")),
             )
             consecutive_failures = 0
+            deferred = False
             for item in pending:
                 action = item["action"]
+                if action["target"] == "digikam":
+                    # digiKam does not notice writes made while it is open, so
+                    # its half waits until it closes. The Memories half has
+                    # already gone ahead.
+                    if not digikam_is_free() or not digikam_database_is_free(database):
+                        if not deferred:
+                            LOG.info(
+                                "digiKam is in use; holding its changes for run %s", run_id
+                            )
+                        deferred = True
+                        continue
+                    ensure_backup()
                 try:
                     outcome = executor.execute(action)
                     self.state.finish_apply_action(item["id"], "applied", result=outcome)
@@ -681,6 +769,27 @@ class AppService:
                     break
 
             counts = self.state.apply_counts(run_id)
+            if deferred and counts["pending"]:
+                # Nothing failed. The rest is simply waiting for digiKam.
+                self.state.set_deferred(run_id, "digikam")
+                self.state.update_progress(
+                    run_id, "deferred",
+                    counts["applied"] + counts["failed"] + counts["ignored"],
+                    counts["total"], counts,
+                )
+                self.state.create_notification(
+                    "sync.deferred",
+                    f"{counts['pending']} changes are waiting for digiKam",
+                    "They will be applied when you quit digiKam.",
+                    f"/runs/{run_id}",
+                    run_id=run_id,
+                )
+                LOG.info(
+                    "Run %s deferred: %s changes wait for digiKam to close",
+                    run_id, counts["pending"],
+                )
+                return
+
             final_status = "applied" if not counts["failed"] and not counts["pending"] else "apply_failed"
             final = self.state.finish_apply(run_id, final_status)
             self.state.update_progress(
@@ -714,6 +823,14 @@ class AppService:
                 )
         except Exception as error:
             LOG.exception("Apply %s failed", run_id)
+            if self._park_for_retry(run_id, error):
+                counts = self.state.apply_counts(run_id)
+                self.state.update_progress(
+                    run_id, "waiting",
+                    counts["applied"] + counts["failed"] + counts["ignored"],
+                    counts["total"], counts, error=str(error),
+                )
+                return
             final = self.state.finish_apply(run_id, "apply_failed")
             self.state.update_progress(
                 run_id, "apply_failed", final["applied"] + final["failed"] + final["ignored"],
@@ -879,8 +996,17 @@ class AppService:
             raise ValueError("The saved Nextcloud app password is unavailable.")
         if run_id is None:
             run_id = self.state.create_run(scope)
+        saved = self.state.checkpoint(run_id)
+        report = SyncReport()
+        if saved is not None:
+            checkpoint_module.restore(report, saved["counters"])
+            LOG.info(
+                "Resuming run %s from %s (%s actions already recorded)",
+                run_id, saved["phase"], self.state.count_preview_actions(run_id),
+            )
         backend = None
         face_ledger = StateLedger(self.state).load()
+        sink = StateCheckpoint(self.state, run_id)
         try:
             backend = self.backend_factory(
                 str(settings["nextcloud_url"]), user_id, password, http_workers=16
@@ -923,25 +1049,43 @@ class AppService:
                         detail,
                     )
 
-                report = self.sync_function(
-                    digikam,
-                    backend,
-                    path_maps=[
-                        (
-                            str(settings["digikam_library"]),
-                            str(settings.get("nc_photos_path", "Photos")),
-                        )
-                    ],
-                    apply=False,
-                    only_person=person or None,
-                    insert_missing=True,
-                    prefer_digikam_on_conflict=False,
-                    batch_size=250,
-                    max_actions=250000,
-                    session=None,
-                    progress_callback=forward_progress,
-                    ledger=face_ledger,
-                )
+                phase = saved["phase"] if saved else checkpoint_module.SCANNING_DIGIKAM
+                cursor = saved["cursor"] if saved else {}
+                start_index = 0
+                if phase == checkpoint_module.SCANNING_MEMORIES:
+                    # The digiKam half is already written out and counted.
+                    start_index = int(cursor.get("path_index") or 0)
+                else:
+                    report = self.sync_function(
+                        digikam,
+                        backend,
+                        path_maps=[
+                            (
+                                str(settings["digikam_library"]),
+                                str(settings.get("nc_photos_path", "Photos")),
+                            )
+                        ],
+                        apply=False,
+                        only_person=person or None,
+                        insert_missing=True,
+                        prefer_digikam_on_conflict=False,
+                        batch_size=250,
+                        max_actions=250000,
+                        session=None,
+                        progress_callback=forward_progress,
+                        ledger=face_ledger,
+                        checkpoint=sink,
+                        start_after_image_id=cursor.get("after_image_id"),
+                        report=report,
+                    )
+                    # Move the mark before the second half starts, so a crash
+                    # here does not replay the first half.
+                    self.state.save_checkpoint(
+                        run_id,
+                        checkpoint_module.SCANNING_MEMORIES,
+                        {"path_index": 0},
+                        checkpoint_module.counters_of(report),
+                    )
                 compare_memories_to_digikam(
                     digikam,
                     selected_faces,
@@ -949,6 +1093,8 @@ class AppService:
                     ledger=face_ledger,
                     batch_size=250,
                     max_actions=250000,
+                    checkpoint=sink,
+                    start_index=start_index,
                     progress_callback=lambda progress: self.state.update_progress(
                         run_id,
                         "scanning_memories",
@@ -962,7 +1108,11 @@ class AppService:
                         },
                     ),
                 )
+            # Anything still in memory belongs to the final partial batch.
+            sink.batch_done(checkpoint_module.FINISHED, {}, report)
             data = report.to_dict()
+            data["actions"] = self.state.preview_actions(run_id)
+            data["conflicts"] = []
             actions, ignored_actions = self.state.filter_ignored_actions(data["actions"])
             data["actions"] = actions
             for action in ignored_actions:
@@ -986,11 +1136,14 @@ class AppService:
             self.state.update_progress(
                 run_id, "completed", total_work, total_work, summary
             )
-            # Only a full run has seen everything, so only a full run may
-            # close a question it no longer reports.
-            self.state.save_conflicts(
-                run_id, data["conflicts"], close_unseen=(scope == "all")
-            )
+            # Conflicts were written out batch by batch. Only a full run has
+            # seen everything, so only a full run may close what it no longer
+            # reports.
+            if scope == "all":
+                closed = self.state.close_conflicts_not_seen(run_id)
+                if closed:
+                    LOG.info("Closed %s conflicts settled in one of the libraries", closed)
+            self.state.clear_checkpoint(run_id)
             if summary["conflicts"]:
                 self.state.create_notification(
                     "conflicts.created",
@@ -1015,6 +1168,13 @@ class AppService:
                 )
             return result
         except Exception as error:
+            if self._park_for_retry(run_id, error):
+                self.state.update_progress(
+                    run_id, "waiting", 0, 0,
+                    {"reason": coordinator_module.WAITING_CONNECTION},
+                    error=str(error),
+                )
+                raise
             self.state.finish_run(run_id, "failed", {})
             self.state.update_progress(run_id, "failed", 0, 0, error=str(error))
             self.state.create_notification(

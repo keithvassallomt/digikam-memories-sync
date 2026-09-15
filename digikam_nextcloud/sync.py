@@ -6,6 +6,7 @@ import signal
 import time
 from typing import Any, Callable, Optional
 
+from . import checkpoint as checkpoint_module
 from . import ledger as ledger_module
 from .constants import DEFAULT_SKIP_PERSONS
 from .digikam import DigikamDB
@@ -38,9 +39,10 @@ def _record_action(
     *,
     max_actions: int,
 ) -> None:
-    if len(report.actions) < max_actions:
+    report.actions_total += 1
+    if report.actions_total <= max_actions:
         report.actions.append(action)
-    elif len(report.actions) == max_actions:
+    elif report.actions_total == max_actions + 1:
         report.actions.append(
             RegionAction(
                 action="skip",
@@ -400,6 +402,9 @@ def sync(
     session: Optional[SessionState] = None,
     progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
     ledger: Optional[ledger_module.Ledger] = None,
+    checkpoint: Optional[checkpoint_module.Checkpoint] = None,
+    start_after_image_id: Optional[int] = None,
+    report: Optional[SyncReport] = None,
 ) -> SyncReport:
     """
     Sync digiKam faces → Nextcloud in image batches.
@@ -418,9 +423,15 @@ def sync(
     both libraries agreed on, so a rename on one side becomes an automatic
     change on the other instead of a question. Without one, every disagreement
     is a conflict, which is the command line's behaviour.
+
+    When ``checkpoint`` is provided, each batch is written out and the last
+    image id recorded, so an interrupted run can continue from
+    ``start_after_image_id`` instead of starting again.
     """
     face_ledger = ledger if ledger is not None else ledger_module.NullLedger()
-    report = SyncReport()
+    progress = checkpoint if checkpoint is not None else checkpoint_module.NullCheckpoint()
+    # A resumed run continues into the counters its earlier segment reached.
+    report = report if report is not None else SyncReport()
     t_start = time.monotonic()
     cancelled = False
 
@@ -666,6 +677,7 @@ def sync(
             limit_images=limit_images,
             only_person=only_person_clean,
             skip_image_ids=skip_ids,
+            start_after_image_id=start_after_image_id,
         ):
             if cancel_requested:
                 cancelled = True
@@ -863,6 +875,20 @@ def sync(
                 f"{eta:.0f}s" if rate > 0 else "?",
             )
             publish_progress("scanning", images_done, total_images)
+
+            # Write this batch out and remember how far the scan reached. The
+            # id list is ascending, so one number is enough to resume.
+            reached = (
+                max(processed_ids)
+                if batch_cancelled_mid and processed_ids
+                else (batch[-1].image_id if batch else start_after_image_id)
+            )
+            if reached is not None:
+                progress.batch_done(
+                    checkpoint_module.SCANNING_DIGIKAM,
+                    {"after_image_id": int(reached)},
+                    report,
+                )
 
             if cancelled:
                 break

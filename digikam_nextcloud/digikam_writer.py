@@ -73,6 +73,26 @@ def terminate_digikam(timeout: float = 6.0) -> dict[str, Any]:
     return {"supported": True, "closed": not remaining, "remaining": remaining}
 
 
+def digikam_database_is_free(database: str | Path, timeout: float = 1.0) -> bool:
+    """Confirm nothing else holds a write lock on the database.
+
+    The process check can miss a digiKam running elsewhere against a shared
+    library, so the lock itself is the second opinion.
+    """
+    try:
+        connection = sqlite3.connect(str(database), timeout=max(0.0, timeout))
+    except sqlite3.Error:
+        return False
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.rollback()
+        return True
+    except sqlite3.OperationalError:
+        return False
+    finally:
+        connection.close()
+
+
 def create_sqlite_backup(database: str | Path, destination: str | Path) -> Path:
     """Create a consistent backup even when the source database uses WAL."""
     source_path = Path(database).resolve()

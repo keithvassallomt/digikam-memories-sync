@@ -18,6 +18,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+from .coordinator import Coordinator
 from .local_server import create_server
 from .logging_setup import setup_service_logging
 from .settings import SettingsStore
@@ -199,6 +200,7 @@ def run_service(
     configured = saved.get("port") if isinstance(saved, dict) else None
     wanted = int(port if port is not None else configured or DEFAULT_PORT)
     server = None
+    coordinator = None
     handlers: list[logging.Handler] = []
     try:
         server = _bind(directory, wanted)
@@ -229,12 +231,17 @@ def run_service(
                 except (ValueError, OSError):  # not the main thread, or unsupported
                     pass
 
+        coordinator = Coordinator(server.app)
+        coordinator.start()
+
         if on_start is not None:
             on_start(server)
         server.serve_forever(poll_interval=0.2)
         LOG.info("Face Sync service stopped")
         return 0
     finally:
+        if coordinator is not None:
+            coordinator.stop()
         remove_service_info(config_dir)
         for handler in handlers:
             try:

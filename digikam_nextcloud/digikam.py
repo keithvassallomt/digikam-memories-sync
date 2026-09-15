@@ -439,6 +439,7 @@ class DigikamDB:
         limit_images: Optional[int] = None,
         only_person: Optional[str] = None,
         skip_image_ids: Optional[set[int]] = None,
+        start_after_image_id: Optional[int] = None,
     ) -> Iterator[list[DigikamImage]]:
         """
         Yield batches of DigikamImage that have at least one named face.
@@ -448,6 +449,10 @@ class DigikamDB:
         (targeted tag lookup — not a full library scan).
 
         ``skip_image_ids`` drops already-processed digiKam image ids (resume).
+
+        ``start_after_image_id`` resumes from a point in the id order without
+        carrying a set of everything already done, which is what a long run
+        interrupted half way needs.
         """
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
@@ -472,6 +477,19 @@ class DigikamDB:
         if limit_images is not None:
             all_ids = all_ids[: int(limit_images)]
             LOG.info("Limited to first %d faced images", len(all_ids))
+
+        if start_after_image_id is not None:
+            cutoff = int(start_after_image_id)
+            before = len(all_ids)
+            # The id list is already ordered, so resuming is a slice, not a
+            # membership test against everything done so far.
+            all_ids = [image_id for image_id in all_ids if image_id > cutoff]
+            LOG.info(
+                "Resuming after image id %d (%d of %d images remain)",
+                cutoff,
+                len(all_ids),
+                before,
+            )
 
         skip = skip_image_ids or set()
         if skip:

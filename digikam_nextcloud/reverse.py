@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Callable, Iterable, Optional
 
+from . import checkpoint as checkpoint_module
 from . import ledger as ledger_module
 from .constants import DEFAULT_SKIP_PERSONS
 from .digikam import DigikamDB
@@ -68,6 +69,8 @@ def compare_memories_to_digikam(
     max_unmatched: int = 500,
     progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
     ledger: Optional[ledger_module.Ledger] = None,
+    checkpoint: Optional[checkpoint_module.Checkpoint] = None,
+    start_index: int = 0,
 ) -> SyncReport:
     """Merge the preview of Memories-originating faces into ``report``.
 
@@ -78,6 +81,7 @@ def compare_memories_to_digikam(
     side can be shown to have changed.
     """
     face_ledger = ledger if ledger is not None else ledger_module.NullLedger()
+    progress = checkpoint if checkpoint is not None else checkpoint_module.NullCheckpoint()
     grouped: dict[str, list[NextcloudNamedFace]] = defaultdict(list)
     for relative, named_face in selected_faces:
         grouped[normalize_path(relative).strip("/")].append(named_face)
@@ -85,6 +89,9 @@ def compare_memories_to_digikam(
     paths = sorted(grouped, key=str.casefold)
     report.files_memories = len(paths)
     report.faces_memories = sum(len(group) for group in grouped.values())
+    if start_index:
+        # The path order is deterministic, so a position is enough to resume.
+        paths = paths[int(start_index):]
     existing_conflicts = {
         (conflict.nc_file_id, conflict.nc_detection_id)
         for conflict in report.conflicts
@@ -168,7 +175,8 @@ def compare_memories_to_digikam(
                 if represented is not None:
                     digikam_face, iou = represented
                     report.skipped += 1
-                    if len(report.actions) < max_actions:
+                    report.actions_total += 1
+                    if report.actions_total <= max_actions:
                         report.actions.append(
                             RegionAction(
                                 action="skip",
@@ -190,7 +198,8 @@ def compare_memories_to_digikam(
                         )
                     continue
                 report.created_in_digikam += 1
-                if len(report.actions) < max_actions:
+                report.actions_total += 1
+                if report.actions_total <= max_actions:
                     report.actions.append(
                         RegionAction(
                             action="create_digikam",
@@ -207,12 +216,17 @@ def compare_memories_to_digikam(
                     )
 
         done += len(batch_paths)
+        progress.batch_done(
+            checkpoint_module.SCANNING_MEMORIES,
+            {"path_index": int(start_index) + done},
+            report,
+        )
         if progress_callback is not None:
             progress_callback(
                 {
                     "phase": "scanning_memories",
-                    "current": done,
-                    "total": len(paths),
+                    "current": int(start_index) + done,
+                    "total": int(start_index) + len(paths),
                     "matched": report.files_matched + reverse_matched,
                     "assigned": report.assigned,
                     "inserted": report.inserted,

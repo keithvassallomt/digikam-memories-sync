@@ -316,7 +316,8 @@ def create_server(config_dir: Path | None = None, port: int = 0) -> FaceSyncHTTP
     settings = SettingsStore(config_dir)
     root = settings.root
     state = StateStore(root / "state.sqlite3")
-    state.recover_interrupted_previews()
-    state.recover_interrupted_applies()
+    recovered = state.recover_unfinished_runs()
+    if recovered["total"]:
+        LOG.info("Re-queued %s unfinished runs from the last session", recovered["total"])
     return FaceSyncHTTPServer(("127.0.0.1", port), AppService(settings, state))
 

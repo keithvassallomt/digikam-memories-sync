@@ -1,0 +1,218 @@
+"""Deciding when work may run, and picking it back up when it may.
+
+Everything that can stop a sync is a gate: someone paused it, digiKam is open,
+Nextcloud is unreachable, another job is already going. The decision itself is
+a plain function over a snapshot, so every rule can be tested without a thread,
+a clock or a network.
+"""
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
+
+LOG = logging.getLogger(__name__)
+
+TICK_SECONDS = 10.0
+# How long after digiKam disappears before its database is treated as free.
+DIGIKAM_SETTLE_SECONDS = 15.0
+# A wall-clock jump larger than this, with no matching monotonic time, is sleep.
+SLEEP_THRESHOLD_SECONDS = 60.0
+# Waits between attempts after a connection failure.
+BACKOFF_MINUTES = (1, 2, 5, 15, 30, 60)
+
+# Why a run is not starting. These reach the user as sentences, elsewhere.
+WAITING_DIGIKAM = "digikam"
+WAITING_CONNECTION = "connection"
+WAITING_PAUSED = "paused"
+WAITING_JOB = "job_running"
+WAITING_ATTEMPT = "backoff"
+WAITING_RESUME = "resume"
+
+
+def backoff_delay(attempts: int) -> timedelta:
+    """How long to wait before the next attempt, levelling off at an hour."""
+    index = max(0, min(int(attempts), len(BACKOFF_MINUTES) - 1))
+    return timedelta(minutes=BACKOFF_MINUTES[index])
+
+
+def next_attempt_at(attempts: int, now: datetime | None = None) -> str:
+    moment = (now or datetime.now(timezone.utc)) + backoff_delay(attempts)
+    return moment.isoformat(timespec="seconds")
+
+
+def _parse(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+@dataclass
+class Snapshot:
+    """Everything the decision needs, gathered once per tick."""
+
+    now: datetime
+    paused: bool = False
+    job_running: bool = False
+    digikam_running: bool = True
+    digikam_free_since: datetime | None = None
+    connection_ready: bool = True
+
+
+@dataclass
+class Decision:
+    run_id: int | None = None
+    reason: str = ""
+    blocked: dict[int, str] = field(default_factory=dict)
+
+    @property
+    def should_start(self) -> bool:
+        return self.run_id is not None
+
+
+def digikam_gate_open(snapshot: Snapshot) -> bool:
+    """digiKam writes need it closed, and settled for a moment afterwards."""
+    if snapshot.digikam_running:
+        return False
+    if snapshot.digikam_free_since is None:
+        return False
+    waited = (snapshot.now - snapshot.digikam_free_since).total_seconds()
+    return waited >= DIGIKAM_SETTLE_SECONDS
+
+
+def blocking_reason(run: dict[str, Any], snapshot: Snapshot) -> str:
+    """Why this run cannot start right now, or an empty string if it can."""
+    if snapshot.paused:
+        return WAITING_PAUSED
+    scheduled = _parse(run.get("next_attempt_at"))
+    if scheduled is not None and scheduled > snapshot.now:
+        return WAITING_ATTEMPT
+    reason = str(run.get("waiting_reason") or "")
+    if run.get("status") == "deferred" or reason == WAITING_DIGIKAM:
+        return "" if digikam_gate_open(snapshot) else WAITING_DIGIKAM
+    if reason == WAITING_CONNECTION and not snapshot.connection_ready:
+        return WAITING_CONNECTION
+    return ""
+
+
+def choose(runs: list[dict[str, Any]], snapshot: Snapshot) -> Decision:
+    """Pick at most one run to continue, oldest first."""
+    if snapshot.job_running:
+        return Decision(blocked={int(run["id"]): WAITING_JOB for run in runs})
+    blocked: dict[int, str] = {}
+    for run in sorted(runs, key=lambda item: int(item["id"])):
+        reason = blocking_reason(run, snapshot)
+        if reason:
+            blocked[int(run["id"])] = reason
+            continue
+        return Decision(
+            run_id=int(run["id"]),
+            reason=str(run.get("waiting_reason") or run.get("status") or ""),
+            blocked=blocked,
+        )
+    return Decision(blocked=blocked)
+
+
+class Coordinator:
+    """The thread that applies those rules on a timer."""
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        interval: float = TICK_SECONDS,
+        monotonic: Callable[[], float] = time.monotonic,
+        wall: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    ):
+        self.app = app
+        self.interval = interval
+        self.monotonic = monotonic
+        self.wall = wall
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._digikam_free_since: datetime | None = None
+        self._last_monotonic = monotonic()
+        self._last_wall = wall()
+        self.slept = False
+        self.ticks = 0
+
+    # ------------------------------------------------------------ lifecycle
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._loop, name="face-sync-coordinator", daemon=True
+        )
+        self._thread.start()
+        LOG.info("Coordinator started")
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+            self._thread = None
+            LOG.info("Coordinator stopped")
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.interval):
+            try:
+                self.tick()
+            except Exception:
+                LOG.exception("The coordinator tick failed")
+
+    # ----------------------------------------------------------------- work
+
+    def detect_sleep(self) -> bool:
+        """A wall clock that moved further than the monotonic one means sleep."""
+        monotonic_now = self.monotonic()
+        wall_now = self.wall()
+        elapsed = monotonic_now - self._last_monotonic
+        drifted = (wall_now - self._last_wall).total_seconds()
+        self._last_monotonic = monotonic_now
+        self._last_wall = wall_now
+        return (drifted - elapsed) > SLEEP_THRESHOLD_SECONDS
+
+    def snapshot(self) -> Snapshot:
+        now = self.wall()
+        running = self.app.digikam_running()
+        if running:
+            self._digikam_free_since = None
+        elif self._digikam_free_since is None:
+            self._digikam_free_since = now
+        paused, _ = self.app._paused_until()
+        return Snapshot(
+            now=now,
+            paused=paused,
+            job_running=self.app.active_run_id() is not None,
+            digikam_running=running,
+            digikam_free_since=self._digikam_free_since,
+            connection_ready=True,
+        )
+
+    def tick(self) -> Decision:
+        """One pass: notice a sleep, then continue whatever may continue."""
+        self.ticks += 1
+        if self.detect_sleep():
+            self.slept = True
+            LOG.info("Resumed after sleep; rechecking before continuing")
+            self.app.invalidate_probes()
+
+        runs = self.app.state.runs_awaiting_work()
+        if not runs:
+            return Decision()
+        decision = choose(runs, self.snapshot())
+        if decision.should_start:
+            LOG.info("Continuing run %s", decision.run_id)
+            try:
+                self.app.resume_run(decision.run_id)
+            except Exception:
+                LOG.exception("Could not continue run %s", decision.run_id)
+        return decision
