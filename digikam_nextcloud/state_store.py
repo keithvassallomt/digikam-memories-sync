@@ -165,6 +165,49 @@ class StateStore:
                 self.conn.commit()
             return len(run_ids)
 
+    def recover_interrupted_previews(self) -> int:
+        """Mark previews abandoned by a stopped local service as failed."""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id FROM runs WHERE status = 'previewing'"
+            ).fetchall()
+            run_ids = [int(row[0]) for row in rows]
+            if run_ids:
+                placeholders = ",".join("?" * len(run_ids))
+                self.conn.execute(
+                    f"""UPDATE runs SET status = 'failed', finished_at = CURRENT_TIMESTAMP
+                        WHERE id IN ({placeholders})""",
+                    run_ids,
+                )
+                self.conn.execute(
+                    f"""UPDATE run_progress SET phase = 'failed',
+                        error = 'Face Sync stopped before the preview finished.'
+                        WHERE run_id IN ({placeholders})""",
+                    run_ids,
+                )
+                self.conn.commit()
+            return len(run_ids)
+
+    def discard_preview(self, run_id: int) -> None:
+        """Discard a saved preview while retaining it in run history."""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT status FROM runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("Preview run not found.")
+            if row["status"] != "previewed":
+                raise ValueError("Only a completed preview can be discarded.")
+            # Older completed previews have already been superseded by this one.
+            # Mark them too so none can unexpectedly reappear later.
+            self.conn.execute(
+                """UPDATE runs SET status = 'discarded',
+                   finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP)
+                   WHERE id <= ? AND status = 'previewed'""",
+                (run_id,),
+            )
+            self.conn.commit()
+
     def latest_actionable_run(self) -> dict[str, Any] | None:
         with self.lock:
             row = self.conn.execute(

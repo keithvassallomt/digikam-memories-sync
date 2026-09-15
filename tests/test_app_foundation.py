@@ -13,6 +13,7 @@ from digikam_nextcloud.app_service import AppService, resolve_digikam_database
 from digikam_nextcloud.local_server import FaceSyncHTTPServer
 from digikam_nextcloud.models import NextcloudRequirements
 from digikam_nextcloud.models import RegionConflict, SyncReport
+from digikam_nextcloud.nextcloud_http import NextcloudConnectionError
 from digikam_nextcloud.settings import SettingsStore
 from digikam_nextcloud.state_store import StateStore
 
@@ -107,6 +108,39 @@ class AppFoundationTests(unittest.TestCase):
             unread = state.unread_notifications()
             self.assertEqual(unread[0]["id"], notification_id)
             self.assertEqual(unread[0]["target"], "/runs/7/conflicts")
+        finally:
+            state.close()
+
+    def test_discarding_latest_preview_also_retires_older_saved_previews(self):
+        state = StateStore(self.root / "state.sqlite3")
+        try:
+            older = state.create_run("person")
+            state.finish_run(older, "previewed", {})
+            latest = state.create_run("person")
+            state.finish_run(latest, "previewed", {})
+
+            state.discard_preview(latest)
+
+            self.assertEqual(state.run(older)["status"], "discarded")
+            self.assertEqual(state.run(latest)["status"], "discarded")
+            self.assertIsNone(state.latest_actionable_run())
+        finally:
+            state.close()
+
+    def test_interrupted_preview_is_not_restored_after_restart(self):
+        state = StateStore(self.root / "state.sqlite3")
+        try:
+            run_id = state.create_run("person")
+
+            self.assertEqual(state.recover_interrupted_previews(), 1)
+
+            recovered = state.run(run_id)
+            self.assertEqual(recovered["status"], "failed")
+            self.assertEqual(
+                recovered["error"],
+                "Face Sync stopped before the preview finished.",
+            )
+            self.assertIsNone(state.latest_actionable_run())
         finally:
             state.close()
 
@@ -235,6 +269,48 @@ class AppFoundationTests(unittest.TestCase):
             )
             with urllib.request.urlopen(request) as response:
                 self.assertEqual(json.load(response), {"status": "ok"})
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+            state.close()
+
+    def test_people_api_returns_a_visible_error_for_nextcloud_failure(self):
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        settings.save(
+            {
+                "digikam_library": str(self.library),
+                "digikam_db": str(self.library / "digikam4.db"),
+                "nextcloud_url": "https://cloud.test",
+                "nc_user": "keith",
+            },
+            "secret",
+        )
+        state = StateStore(self.root / "state.sqlite3")
+
+        def unavailable_backend(*args, **kwargs):
+            raise NextcloudConnectionError("Nextcloud is temporarily unavailable.")
+
+        service = AppService(settings, state, backend_factory=unavailable_backend)
+        server = FaceSyncHTTPServer(("127.0.0.1", 0), service)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/api/people"
+        request = urllib.request.Request(
+            url, headers={"X-Face-Sync-Token": server.api_token}
+        )
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as denied:
+                urllib.request.urlopen(request)
+            self.assertEqual(denied.exception.code, 400)
+            self.assertEqual(
+                json.load(denied.exception),
+                {
+                    "code": "people_unavailable",
+                    "error": "Nextcloud is temporarily unavailable.",
+                },
+            )
+            denied.exception.close()
         finally:
             server.shutdown()
             thread.join(timeout=2)

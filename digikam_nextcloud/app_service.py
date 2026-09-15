@@ -207,6 +207,14 @@ class AppService:
             raise ValueError("Preview run not found.")
         return result
 
+    def discard_preview(self, run_id: int) -> dict[str, Any]:
+        with self._job_lock:
+            thread = self._jobs.get(run_id)
+            if thread is not None and thread.is_alive():
+                raise ValueError("This preview is still running and cannot be discarded yet.")
+        self.state.discard_preview(run_id)
+        return {"run_id": run_id, "status": "discarded"}
+
     def conflicts(self, run_id: int) -> dict[str, Any]:
         return self.state.conflicts_for_run(run_id)
 

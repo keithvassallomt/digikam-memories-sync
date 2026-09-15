@@ -62,7 +62,10 @@
           <label class="scope-option"><input type="radio" name="scope" value="all"><strong>All faces</strong><span>Compare every named face in both libraries.</span></label>
           <label class="scope-option"><input type="radio" name="scope" value="person" checked><strong>One person</strong><span>Choose one person for a quicker run.</span></label>
         </div>
-        <label id="person-field" class="person-field">Person<select id="person-select"><option value="">Loading people…</option></select></label>
+        <div id="person-field" class="person-controls">
+          <label class="person-field">Person<select id="person-select" disabled><option value="">Loading people…</option></select></label>
+          <button id="retry-people-button" class="secondary" type="button" hidden>Try again</button>
+        </div>
         <div id="scope-message" class="message" aria-live="polite"></div>
         <div class="actions"><button id="back-button" class="secondary" type="button">Back to settings</button><button id="preview-button" class="primary" type="button">Preview changes</button></div>
       </section>
@@ -105,7 +108,7 @@
             <li><span>Warnings</span><strong id="result-warnings">0</strong></li>
           </ul>
         </section>
-        <div class="actions"><button id="preview-back-button" class="secondary" type="button">Back</button><button id="review-conflicts-button" class="primary" type="button">Continue to Apply</button></div>
+        <div class="actions"><button id="preview-back-button" class="secondary" type="button">Discard preview</button><button id="review-conflicts-button" class="primary" type="button">Continue to Apply</button></div>
       </section>
 
       <section id="conflict-screen" class="screen">

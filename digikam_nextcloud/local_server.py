@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import secrets
 import threading
 import webbrowser
@@ -19,6 +20,7 @@ from .state_store import StateStore
 
 WEB_ROOT = Path(__file__).with_name("web")
 CONTENT_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
+LOG = logging.getLogger(__name__)
 
 
 class FaceSyncHTTPServer(ThreadingHTTPServer):
@@ -48,7 +50,19 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
         elif path == "/api/digikam/discover":
             self._json(HTTPStatus.OK, {"databases": discover_digikam_databases()})
         elif path == "/api/people":
-            self._json(HTTPStatus.OK, {"people": self.server.app.people()})
+            try:
+                self._json(HTTPStatus.OK, {"people": self.server.app.people()})
+            except (NextcloudConnectionError, ValueError) as error:
+                self._json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"code": "people_unavailable", "error": str(error)},
+                )
+            except Exception:
+                LOG.exception("Could not load people")
+                self._json(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {"error": "People could not be loaded. Try again."},
+                )
         elif path == "/api/notifications":
             self._json(
                 HTTPStatus.OK,
@@ -123,6 +137,11 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                     self._json(
                         HTTPStatus.ACCEPTED,
                         self.server.app.start_apply(int(parts[2]), payload),
+                    )
+                elif len(parts) == 4 and parts[3] == "discard":
+                    self._json(
+                        HTTPStatus.OK,
+                        self.server.app.discard_preview(int(parts[2])),
                     )
                 elif len(parts) == 5 and parts[3] == "conflicts":
                     self._json(
@@ -207,6 +226,7 @@ def create_server(config_dir: Path | None = None, port: int = 0) -> FaceSyncHTTP
     settings = SettingsStore(config_dir)
     root = settings.root
     state = StateStore(root / "state.sqlite3")
+    state.recover_interrupted_previews()
     state.recover_interrupted_applies()
     return FaceSyncHTTPServer(("127.0.0.1", port), AppService(settings, state))
 

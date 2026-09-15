@@ -16,6 +16,7 @@ let failurePhotoRequest = 0;
 let failureCrop = null;
 let failureRect = null;
 let failureReviewTotal = 0;
+let peopleLoadPromise = null;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -137,21 +138,62 @@ document.getElementById('back-button').addEventListener('click', () => {
 
 document.querySelectorAll('input[name="scope"]').forEach((radio) => radio.addEventListener('change', () => {
   document.getElementById('person-field').hidden = radio.value === 'all' && radio.checked;
+  updatePreviewButton();
 }));
 
-async function loadPeople() {
-  const result = await api('/api/people');
+function updatePreviewButton() {
+  const scope = document.querySelector('input[name="scope"]:checked').value;
   const select = document.getElementById('person-select');
-  select.replaceChildren();
-  result.people.forEach((person) => {
-    const option = document.createElement('option');
-    option.value = person;
-    option.textContent = person;
-    select.appendChild(option);
-  });
-  const gail = [...select.options].find((option) => option.value === 'Gail Vassallo');
-  if (gail) select.value = gail.value;
+  document.getElementById('preview-button').disabled = scope === 'person' && (select.disabled || !select.value);
 }
+
+async function loadPeople() {
+  if (peopleLoadPromise) return peopleLoadPromise;
+  const select = document.getElementById('person-select');
+  const retry = document.getElementById('retry-people-button');
+  const scopeMessage = document.getElementById('scope-message');
+  const loading = document.createElement('option');
+  loading.value = '';
+  loading.textContent = 'Loading people…';
+  select.replaceChildren(loading);
+  select.disabled = true;
+  retry.hidden = true;
+  scopeMessage.textContent = '';
+  scopeMessage.className = 'message';
+  updatePreviewButton();
+  peopleLoadPromise = (async () => {
+    try {
+      const result = await api('/api/people');
+      select.replaceChildren();
+      result.people.forEach((person) => {
+        const option = document.createElement('option');
+        option.value = person;
+        option.textContent = person;
+        select.appendChild(option);
+      });
+      if (!result.people.length) throw new Error('No named people were found in either library.');
+      select.disabled = false;
+      const gail = [...select.options].find((option) => option.value === 'Gail Vassallo');
+      if (gail) select.value = gail.value;
+    } catch (error) {
+      const failed = document.createElement('option');
+      failed.value = '';
+      failed.textContent = 'People could not be loaded';
+      select.replaceChildren(failed);
+      select.disabled = true;
+      retry.hidden = false;
+      scopeMessage.textContent = error.message;
+      scopeMessage.className = 'message error';
+    } finally {
+      peopleLoadPromise = null;
+      updatePreviewButton();
+    }
+  })();
+  return peopleLoadPromise;
+}
+
+document.getElementById('retry-people-button').addEventListener('click', loadPeople);
+document.getElementById('person-select').addEventListener('change', updatePreviewButton);
 
 function showPreview(result) {
   const summary = result.summary;
@@ -459,12 +501,26 @@ document.getElementById('preview-button').addEventListener('click', async (event
   }
 });
 
-document.getElementById('preview-back-button').addEventListener('click', () => {
-  document.getElementById('preview-screen').classList.remove('active');
-  document.getElementById('scope-screen').classList.add('active');
-  steps[2].classList.remove('current');
-  steps[1].classList.remove('done');
-  steps[1].classList.add('current');
+document.getElementById('preview-back-button').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Discarding…';
+  try {
+    if (currentRunId !== null) {
+      await api(`/api/runs/${currentRunId}/discard`, { method: 'POST', body: '{}' });
+    }
+    currentRunId = null;
+    activateScreen('scope-screen');
+    steps[2].classList.remove('current');
+    steps[1].classList.remove('done');
+    steps[1].classList.add('current');
+    await loadPeople();
+  } catch (error) {
+    window.alert(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Discard preview';
+  }
 });
 
 document.getElementById('review-conflicts-button').addEventListener('click', async (event) => {
@@ -877,7 +933,7 @@ document.getElementById('apply-button').addEventListener('click', async () => {
 
 document.getElementById('retry-apply-button').addEventListener('click', openFailureReview);
 
-document.getElementById('new-sync-button').addEventListener('click', () => {
+document.getElementById('new-sync-button').addEventListener('click', async () => {
   currentRunId = null;
   currentConflicts = [];
   currentApplyReview = null;
@@ -887,6 +943,7 @@ document.getElementById('new-sync-button').addEventListener('click', () => {
     step.classList.toggle('done', index === 0);
     step.classList.toggle('current', index === 1);
   });
+  await loadPeople();
 });
 
 async function loadSettings() {
