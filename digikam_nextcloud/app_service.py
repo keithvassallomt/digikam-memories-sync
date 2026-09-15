@@ -20,7 +20,13 @@ from .digikam_writer import (
     terminate_digikam,
 )
 from . import notify, status as status_module
-from .apply import ApplyExecutor, build_apply_plan, plan_summary
+from .apply import (
+    ApplyExecutor,
+    build_apply_plan,
+    conflict_preview_actions,
+    plan_summary,
+)
+from .ledger import StateLedger
 from .nextcloud_http import NextcloudConnectionError, NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
 from .settings import SettingsStore
@@ -250,7 +256,9 @@ class AppService:
         paused, paused_until = self._paused_until()
         running = self.digikam_running()
         summary = (run or {}).get("summary") or {}
-        digikam_changes = int(summary.get("created_in_digikam") or 0)
+        digikam_changes = int(summary.get("created_in_digikam") or 0) + int(
+            summary.get("reassigned_in_digikam") or 0
+        )
         blocks = bool(
             run
             and run.get("status") == "previewed"
@@ -544,7 +552,7 @@ class AppService:
         if run["status"] not in {"previewed", "applying", "apply_failed", "applied"}:
             raise ValueError("This preview is not ready to apply.")
         conflicts = self.state.conflicts_for_run(run_id)
-        plan = build_apply_plan(run["result"], conflicts)
+        plan = build_apply_plan(run["result"], self.state.plan_conflicts(run_id))
         summary = (
             self.state.remaining_apply_counts(run_id)
             if run.get("apply") is not None
@@ -581,7 +589,7 @@ class AppService:
                 raise ValueError("digiKam is still running. Close it, then try Apply again.")
         run = self.state.run(run_id)
         assert run is not None and run["result"] is not None
-        plan = build_apply_plan(run["result"], self.state.conflicts_for_run(run_id))
+        plan = build_apply_plan(run["result"], self.state.plan_conflicts(run_id))
         with self._job_lock:
             active = [job_id for job_id, thread in self._jobs.items() if thread.is_alive()]
             if active:
@@ -650,7 +658,9 @@ class AppService:
                     self.state.finish_apply_action(item["id"], "applied", result=outcome)
                     link = executor.link_for(action, outcome)
                     if link is not None:
-                        self.state.save_face_link(link)
+                        self.state.record_agreements([
+                            {**link, "synced_name": link["digikam_name"]}
+                        ])
                     consecutive_failures = 0
                 except Exception as error:
                     LOG.exception("Apply action %s failed", item["id"])
@@ -732,6 +742,52 @@ class AppService:
             resolution,
             apply_to_remaining=apply_to_remaining,
         )
+
+    def create_decisions_run(self) -> dict[str, Any]:
+        """Gather decisions no run can carry into a follow-up run of their own.
+
+        A conflict settled after its own run finished cannot be added to that
+        run's journal, so it becomes a small run containing only decisions.
+        """
+        pending = self.state.pending_decisions()
+        if not pending:
+            return {"created": False, "decisions": 0}
+        result = conflict_preview_actions(pending)
+        if not result["actions"]:
+            return {"created": False, "decisions": 0}
+        run_id = self.state.create_run(
+            "decisions", status="previewing", trigger="decisions"
+        )
+        result["run_id"] = run_id
+        result["scope"] = "decisions"
+        result["direction"] = "two_way"
+        self.state.save_result(run_id, result)
+        self.state.finish_run(run_id, "previewed", result["summary"])
+        self.state.update_progress(
+            run_id, "completed", len(result["actions"]), len(result["actions"]),
+            result["summary"],
+        )
+        self.state.mark_decisions_folded([item["id"] for item in pending], run_id)
+        LOG.info("Collected %s decisions into run %s", len(result["actions"]), run_id)
+        return {
+            "created": True,
+            "run_id": run_id,
+            "decisions": len(result["actions"]),
+        }
+
+    def rebuild_ledger(self) -> dict[str, Any]:
+        """Forget every remembered agreement and learn them again.
+
+        The next full run writes them back. Faces that disagree at that moment
+        need one decision each, exactly as they did on the first run.
+        """
+        removed = self.state.clear_ledger()
+        LOG.info("Cleared %s remembered face names", removed)
+        started = self.start_sync({"scope": "all", "preview_only": True})
+        return {"cleared": removed, **started}
+
+    def ledger_summary(self) -> dict[str, Any]:
+        return {"remembered": self.state.ledger_size()}
 
     def failures(self, run_id: int) -> dict[str, Any]:
         run = self.state.run(run_id)
@@ -824,6 +880,7 @@ class AppService:
         if run_id is None:
             run_id = self.state.create_run(scope)
         backend = None
+        face_ledger = StateLedger(self.state).load()
         try:
             backend = self.backend_factory(
                 str(settings["nextcloud_url"]), user_id, password, http_workers=16
@@ -883,11 +940,13 @@ class AppService:
                     max_actions=250000,
                     session=None,
                     progress_callback=forward_progress,
+                    ledger=face_ledger,
                 )
                 compare_memories_to_digikam(
                     digikam,
                     selected_faces,
                     report,
+                    ledger=face_ledger,
                     batch_size=250,
                     max_actions=250000,
                     progress_callback=lambda progress: self.state.update_progress(
@@ -911,6 +970,8 @@ class AppService:
                     data["summary"]["inserted"] -= 1
                 elif action.get("action") == "create_digikam":
                     data["summary"]["created_in_digikam"] -= 1
+                elif action.get("action") == "reassign_digikam":
+                    data["summary"]["reassigned_in_digikam"] -= 1
             data["summary"]["ignored"] = len(ignored_actions)
             summary = data["summary"]
             result = {
@@ -925,7 +986,11 @@ class AppService:
             self.state.update_progress(
                 run_id, "completed", total_work, total_work, summary
             )
-            self.state.save_conflicts(run_id, data["conflicts"])
+            # Only a full run has seen everything, so only a full run may
+            # close a question it no longer reports.
+            self.state.save_conflicts(
+                run_id, data["conflicts"], close_unseen=(scope == "all")
+            )
             if summary["conflicts"]:
                 self.state.create_notification(
                     "conflicts.created",
@@ -939,6 +1004,7 @@ class AppService:
                     summary["assigned"]
                     + summary["inserted"]
                     + summary["created_in_digikam"]
+                    + summary.get("reassigned_in_digikam", 0)
                 )
                 self.state.create_notification(
                     "run.completed" if changes else "run.no_changes",

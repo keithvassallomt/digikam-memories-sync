@@ -165,19 +165,37 @@ export function create({ go, refresh }) {
           send('/api/settings/retention', { log_days }, 'Log retention'))));
   }
 
+  function advancedCard(ledger) {
+    return card(
+      h('h3', {}, 'Advanced'),
+      settingRow('Rebuild the face ledger',
+        `Face Sync remembers ${ledger.remembered.toLocaleString()} agreed names. `
+        + 'Rebuilding forgets them and learns again from a full run, which means '
+        + 'one round of decisions for anything that disagrees.',
+        button('Rebuild', {
+          class: 'button button-small',
+          onClick: async () => {
+            if (!window.confirm('Forget every remembered name and run a full check?')) return;
+            if (await send('/api/ledger/rebuild', {}, 'Ledger rebuild')) go('/');
+          },
+        })));
+  }
+
   async function load() {
     replace(body, h('p', { class: 'muted' }, 'Loading settings…'));
     try {
-      const [settings, service] = await Promise.all([
+      const [settings, service, ledger] = await Promise.all([
         api.get('/api/settings'),
         api.get('/api/service'),
+        api.get('/api/ledger'),
       ]);
       replace(body,
         librariesCard(settings),
         automationCard(settings),
         notificationsCard(settings),
         serviceCard(service),
-        storageCard(settings));
+        storageCard(settings),
+        advancedCard(ledger));
     } catch (error) {
       replace(body, h('p', { class: 'message error' }, error.message));
     }

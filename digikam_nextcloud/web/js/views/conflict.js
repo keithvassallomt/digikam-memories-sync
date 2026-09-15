@@ -39,18 +39,34 @@ export function create({ go, refresh }) {
     }
   }
 
-  function showFinished() {
+  async function showFinished() {
     releasePhoto();
+    // Decisions made after their own run finished need a run to carry them.
+    let collected = { created: false, decisions: 0 };
+    try {
+      collected = await api.post('/api/decisions/apply');
+    } catch (error) {
+      console.warn('The decisions could not be collected', error);
+    }
+    refresh();
     replace(body,
       h('h1', {}, 'Every name is decided'),
-      h('p', { class: 'lead' }, 'Nothing has been changed yet. The decisions are saved with their runs.'),
+      h('p', { class: 'lead' }, 'Nothing has been changed yet.'),
       card(
         h('p', { class: 'completion-mark', 'aria-hidden': 'true' }, '✓'),
         h('h3', {}, 'Your decisions are saved'),
-        h('p', { class: 'muted' }, 'They are applied with the rest of their sync.')),
+        h('p', { class: 'muted' }, collected.created
+          ? `${count(collected.decisions)} of them are ready to apply on their own.`
+          : 'They are applied with the rest of their sync.')),
       h('div', { class: 'actions' },
         button('Back to Home', { onClick: () => go('/') }),
-        button('Needs attention', { class: 'button button-primary', onClick: () => go('/attention') })));
+        collected.created
+          ? button('Review them', {
+              class: 'button button-primary', onClick: () => go(`/runs/${collected.run_id}`),
+            })
+          : button('Needs attention', {
+              class: 'button button-primary', onClick: () => go('/attention'),
+            })));
   }
 
   function show(position) {

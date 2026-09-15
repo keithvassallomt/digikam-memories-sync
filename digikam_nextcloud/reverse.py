@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Callable, Iterable, Optional
 
+from . import ledger as ledger_module
 from .constants import DEFAULT_SKIP_PERSONS
 from .digikam import DigikamDB
 from .matching import match_regions, overlapping_same_person
@@ -66,13 +67,17 @@ def compare_memories_to_digikam(
     max_conflicts: int = 5000,
     max_unmatched: int = 500,
     progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ledger: Optional[ledger_module.Ledger] = None,
 ) -> SyncReport:
     """Merge the preview of Memories-originating faces into ``report``.
 
     This function is deliberately read-only. A named Memories face with no
     overlapping digiKam rectangle becomes a proposed ``create_digikam`` action.
-    An overlapping rectangle with a different name becomes a conflict.
+    An overlapping rectangle with a different name is read against the ledger,
+    exactly as the forward pass does, and only becomes a conflict when neither
+    side can be shown to have changed.
     """
+    face_ledger = ledger if ledger is not None else ledger_module.NullLedger()
     grouped: dict[str, list[NextcloudNamedFace]] = defaultdict(list)
     for relative, named_face in selected_faces:
         grouped[normalize_path(relative).strip("/")].append(named_face)
@@ -108,13 +113,34 @@ def compare_memories_to_digikam(
                 iou_threshold,
             )
             for digikam_face, memories_face, iou in pairs:
+                file_id = int(memories_face.nc_file_id or remote[0].file.file_id)
+                conflict_key = (file_id, memories_face.nc_detection_id)
                 if person_names_match(digikam_face.person, memories_face.person):
+                    face_ledger.record([
+                        {
+                            "nextcloud_file_id": file_id,
+                            "nextcloud_detection_id": memories_face.nc_detection_id,
+                            "digikam_image_id": image.image_id,
+                            "digikam_tag_id": digikam_face.digikam_tag_id,
+                            "synced_name": sanitize_person_name(digikam_face.person),
+                            "digikam_rect": list(digikam_face.rect.as_tuple()),
+                            "nextcloud_rect": list(memories_face.rect.as_tuple()),
+                        }
+                    ])
                     continue
-                conflict_key = (
-                    int(memories_face.nc_file_id or remote[0].file.file_id),
-                    memories_face.nc_detection_id,
-                )
                 if conflict_key in existing_conflicts:
+                    continue
+                verdict = ledger_module.attribute(
+                    digikam_face.person,
+                    memories_face.person,
+                    face_ledger.agreed_name(file_id, memories_face.nc_detection_id),
+                )
+                if verdict in (
+                    ledger_module.MEMORIES_CHANGED,
+                    ledger_module.DIGIKAM_CHANGED,
+                ):
+                    # The forward pass owns this pair and has already proposed
+                    # the change. Recording it twice would double-count it.
                     continue
                 existing_conflicts.add(conflict_key)
                 if len(report.conflicts) < max_conflicts:
@@ -127,7 +153,7 @@ def compare_memories_to_digikam(
                             nextcloud_rect=memories_face.rect.as_tuple(),
                             iou=iou,
                             nc_detection_id=memories_face.nc_detection_id,
-                            nc_file_id=conflict_key[0],
+                            nc_file_id=file_id,
                             digikam_image_id=image.image_id,
                             digikam_tag_id=digikam_face.digikam_tag_id,
                         )
@@ -195,4 +221,5 @@ def compare_memories_to_digikam(
                     "conflicts": report.conflict_count,
                 }
             )
+    face_ledger.flush()
     return report

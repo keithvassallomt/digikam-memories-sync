@@ -6,6 +6,7 @@ import signal
 import time
 from typing import Any, Callable, Optional
 
+from . import ledger as ledger_module
 from .constants import DEFAULT_SKIP_PERSONS
 from .digikam import DigikamDB
 from .matching import match_files, match_regions, overlapping_same_person
@@ -84,7 +85,9 @@ def _process_match(
     max_actions: int,
     max_conflicts: int,
     max_warnings: int,
+    ledger: Optional[ledger_module.Ledger] = None,
 ) -> None:
+    ledger = ledger if ledger is not None else ledger_module.NullLedger()
     path = m.digikam.relative_path
     for nf in nc_faces:
         if not nf.file_name:
@@ -112,6 +115,17 @@ def _process_match(
         same_person = person_names_match(dk_person, nf.person or "")
         if same_person:
             report.skipped += 1
+            ledger.record([
+                {
+                    "nextcloud_file_id": m.nextcloud.file_id,
+                    "nextcloud_detection_id": nf.nc_detection_id,
+                    "digikam_image_id": df.digikam_image_id,
+                    "digikam_tag_id": df.digikam_tag_id,
+                    "synced_name": dk_person,
+                    "digikam_rect": list(df.rect.as_tuple()),
+                    "nextcloud_rect": list(nf.rect.as_tuple()),
+                }
+            ])
             _record_action(
                 report,
                 RegionAction(
@@ -132,34 +146,32 @@ def _process_match(
             )
             continue
 
-        if nf.person and not person_names_match(dk_person, nf.person):
-            conflict = RegionConflict(
-                path=path,
-                digikam_person=dk_person,
-                digikam_rect=df.rect.as_tuple(),
-                nextcloud_person=nf.person,
-                nextcloud_rect=nf.rect.as_tuple(),
-                iou=iou,
-                nc_detection_id=nf.nc_detection_id,
-                nc_file_id=m.nextcloud.file_id,
-                digikam_image_id=df.digikam_image_id,
-                digikam_tag_id=df.digikam_tag_id,
+        old_person = ""
+        if nf.person:
+            # Both sides carry a name and the names differ. What that means
+            # depends on which of them moved since the last agreement.
+            verdict = ledger_module.attribute(
+                dk_person,
+                nf.person,
+                ledger.agreed_name(m.nextcloud.file_id, nf.nc_detection_id),
             )
-            _record_conflict(report, conflict, max_conflicts=max_conflicts)
-            if not prefer_digikam_on_conflict:
+            if verdict == ledger_module.MEMORIES_CHANGED:
+                report.reassigned_in_digikam += 1
                 _record_action(
                     report,
                     RegionAction(
-                        action="conflict",
+                        action="reassign_digikam",
                         path=path,
-                        person=dk_person,
+                        person=nf.person,
+                        old_person=dk_person,
                         rect=df.rect.as_tuple(),
                         detail=(
-                            f"conflict with NC person {nf.person!r} "
-                            f"(IoU={iou:.2f}); left unchanged"
+                            f"Memories renamed this face from {dk_person!r} "
+                            f"to {nf.person!r} (IoU={iou:.2f})"
                         ),
                         nc_file_id=m.nextcloud.file_id,
                         nc_detection_id=nf.nc_detection_id,
+                        nc_cluster_id=nf.nc_cluster_id,
                         digikam_image_id=df.digikam_image_id,
                         digikam_tag_id=df.digikam_tag_id,
                         nc_dav_parent=nf.dav_parent,
@@ -168,10 +180,54 @@ def _process_match(
                     max_actions=max_actions,
                 )
                 continue
-            detail = (
-                f"CONFLICT resolved → digiKam person {dk_person!r} "
-                f"overwrites NC {nf.person!r} (IoU={iou:.2f})"
-            )
+            if verdict == ledger_module.DIGIKAM_CHANGED:
+                old_person = nf.person
+                detail = (
+                    f"digiKam renamed this face from {nf.person!r} "
+                    f"to {dk_person!r} (IoU={iou:.2f})"
+                )
+            else:
+                # No history, or both sides moved. Only a person can settle it.
+                conflict = RegionConflict(
+                    path=path,
+                    digikam_person=dk_person,
+                    digikam_rect=df.rect.as_tuple(),
+                    nextcloud_person=nf.person,
+                    nextcloud_rect=nf.rect.as_tuple(),
+                    iou=iou,
+                    nc_detection_id=nf.nc_detection_id,
+                    nc_file_id=m.nextcloud.file_id,
+                    digikam_image_id=df.digikam_image_id,
+                    digikam_tag_id=df.digikam_tag_id,
+                )
+                _record_conflict(report, conflict, max_conflicts=max_conflicts)
+                if not prefer_digikam_on_conflict:
+                    _record_action(
+                        report,
+                        RegionAction(
+                            action="conflict",
+                            path=path,
+                            person=dk_person,
+                            rect=df.rect.as_tuple(),
+                            detail=(
+                                f"conflict with NC person {nf.person!r} "
+                                f"(IoU={iou:.2f}); left unchanged"
+                            ),
+                            nc_file_id=m.nextcloud.file_id,
+                            nc_detection_id=nf.nc_detection_id,
+                            digikam_image_id=df.digikam_image_id,
+                            digikam_tag_id=df.digikam_tag_id,
+                            nc_dav_parent=nf.dav_parent,
+                            nc_file_name=nf.file_name,
+                        ),
+                        max_actions=max_actions,
+                    )
+                    continue
+                old_person = nf.person
+                detail = (
+                    f"CONFLICT resolved → digiKam person {dk_person!r} "
+                    f"overwrites NC {nf.person!r} (IoU={iou:.2f})"
+                )
         else:
             detail = (
                 f"assign unclustered/empty NC detection to {dk_person!r} "
@@ -210,6 +266,7 @@ def _process_match(
                 action="assign",
                 path=path,
                 person=dk_person,
+                old_person=old_person,
                 rect=df.rect.as_tuple(),
                 detail=detail,
                 nc_file_id=m.nextcloud.file_id,
@@ -229,6 +286,17 @@ def _process_match(
         if represented is not None:
             memories_face, iou = represented
             report.skipped += 1
+            ledger.record([
+                {
+                    "nextcloud_file_id": m.nextcloud.file_id,
+                    "nextcloud_detection_id": memories_face.nc_detection_id,
+                    "digikam_image_id": df.digikam_image_id,
+                    "digikam_tag_id": df.digikam_tag_id,
+                    "synced_name": dk_person,
+                    "digikam_rect": list(df.rect.as_tuple()),
+                    "nextcloud_rect": list(memories_face.rect.as_tuple()),
+                }
+            ])
             _record_action(
                 report,
                 RegionAction(
@@ -331,6 +399,7 @@ def sync(
     http_workers: int = 16,
     session: Optional[SessionState] = None,
     progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
+    ledger: Optional[ledger_module.Ledger] = None,
 ) -> SyncReport:
     """
     Sync digiKam faces → Nextcloud in image batches.
@@ -344,7 +413,13 @@ def sync(
     When ``session`` is provided, progress is persisted after each batch so a
     cancelled run can be resumed with the same session id (already-processed
     digiKam image ids are skipped).
+
+    When ``ledger`` is provided, a disagreement is read against the last name
+    both libraries agreed on, so a rename on one side becomes an automatic
+    change on the other instead of a question. Without one, every disagreement
+    is a conflict, which is the command line's behaviour.
     """
+    face_ledger = ledger if ledger is not None else ledger_module.NullLedger()
     report = SyncReport()
     t_start = time.monotonic()
     cancelled = False
@@ -717,6 +792,7 @@ def sync(
                     max_actions=max_actions,
                     max_conflicts=max_conflicts,
                     max_warnings=max_warnings,
+                    ledger=face_ledger,
                 )
                 processed_ids.append(m.digikam.image_id)
 
@@ -858,6 +934,9 @@ def sync(
                 LOG.warning("Failed to persist session after error: %s", se)
         raise
     finally:
+        # Whatever happened, keep the agreements learned so far. A run that
+        # stops half way should not make the next one re-ask settled questions.
+        face_ledger.flush()
         if session is not None:
             if prev_sigint is not None:
                 signal.signal(signal.SIGINT, prev_sigint)

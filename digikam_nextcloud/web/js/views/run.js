@@ -12,6 +12,7 @@ const RESULT_ROWS = [
   ['assigned', 'Name existing faces in Memories'],
   ['inserted', 'Create face boxes in Memories'],
   ['created_in_digikam', 'Create face boxes in digiKam'],
+  ['reassigned_in_digikam', 'Rename faces in digiKam'],
   ['ignored', 'Kept in one library'],
 ];
 
@@ -59,7 +60,7 @@ export function create({ go, refresh }) {
     return h('div', { class: 'stats' },
       stat(count(summary.skipped || 0), 'Already correct'),
       stat(count((summary.assigned || 0) + (summary.inserted || 0)), 'Changes for Memories'),
-      stat(count(summary.created_in_digikam || 0), 'Changes for digiKam'),
+      stat(count(copy.digikamChangeCount(summary)), 'Changes for digiKam'),
       stat(count(summary.conflicts || 0), 'Need your decision'));
   }
 

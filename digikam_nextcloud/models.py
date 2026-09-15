@@ -132,6 +132,9 @@ class RegionAction:
     person: str
     rect: tuple[float, float, float, float]
     detail: str = ""
+    # The name this face carried before, when a change is being propagated.
+    # Apply re-checks it against the live target and refuses if it moved.
+    old_person: str = ""
     nc_file_id: Optional[int] = None
     nc_detection_id: Optional[int] = None
     nc_cluster_id: Optional[int] = None
@@ -152,6 +155,7 @@ class SyncReport:
     assigned: int = 0
     inserted: int = 0
     created_in_digikam: int = 0
+    reassigned_in_digikam: int = 0
     skipped: int = 0
     files_memories: int = 0
     faces_memories: int = 0
@@ -180,6 +184,7 @@ class SyncReport:
                 "assigned": self.assigned,
                 "inserted": self.inserted,
                 "created_in_digikam": self.created_in_digikam,
+                "reassigned_in_digikam": self.reassigned_in_digikam,
                 "skipped": self.skipped,
                 "conflicts": self.conflict_count,
                 "files_memories": self.files_memories,

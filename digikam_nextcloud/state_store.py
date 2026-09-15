@@ -133,7 +133,24 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "channel": "TEXT",
         "delivered_at": "TEXT",
     },
+    "face_links": {
+        # The one name both libraries last agreed on for this face.
+        "synced_name": "TEXT",
+    },
+    "conflicts": {
+        # Stable identity so the same disagreement is not raised twice.
+        "identity_key": "TEXT",
+        # The run whose plan already carries this decision, if any.
+        "decided_run_id": "INTEGER",
+    },
 }
+
+ADDED_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS face_links_remote"
+    " ON face_links(nextcloud_file_id, nextcloud_detection_id)",
+    "CREATE INDEX IF NOT EXISTS conflicts_identity"
+    " ON conflicts(identity_key, status)",
+)
 
 
 class StateStore:
@@ -145,10 +162,13 @@ class StateStore:
         self.lock = threading.RLock()
         self.conn.executescript(SCHEMA)
         self._add_missing_columns()
+        for statement in ADDED_INDEXES:
+            self.conn.execute(statement)
         self.conn.execute("INSERT OR IGNORE INTO profiles(id, name) VALUES (1, 'Default')")
         self.conn.commit()
 
     def _add_missing_columns(self) -> None:
+        added: set[tuple[str, str]] = set()
         for table, columns in ADDED_COLUMNS.items():
             existing = {
                 str(row["name"])
@@ -159,6 +179,35 @@ class StateStore:
                     self.conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
                     )
+                    added.add((table, name))
+        self._backfill(added)
+
+    def _backfill(self, added: set[tuple[str, str]]) -> None:
+        """Give a newly added column the meaning it would have had all along.
+
+        Only runs the once, when the column first appears, so reopening the
+        database never redoes it.
+        """
+        if ("conflicts", "decided_run_id") in added:
+            # Decisions recorded before this column existed were carried by
+            # their own run. Without this they would look unapplied and be
+            # gathered into a pointless follow-up run.
+            self.conn.execute(
+                """UPDATE conflicts SET decided_run_id = run_id
+                   WHERE status = 'resolved'
+                     AND resolution IN ('digikam', 'memories')"""
+            )
+        if ("face_links", "synced_name") in added:
+            # Links written by an applied change already record one agreed
+            # name under two columns. Adopting it seeds the ledger, so the
+            # first run after upgrading does not re-ask about faces Face Sync
+            # synced itself.
+            self.conn.execute(
+                """UPDATE face_links SET synced_name = digikam_name
+                   WHERE synced_name IS NULL
+                     AND digikam_name IS NOT NULL AND digikam_name <> ''
+                     AND lower(digikam_name) = lower(nextcloud_name)"""
+            )
 
     def close(self) -> None:
         self.conn.close()
@@ -393,6 +442,15 @@ class StateStore:
             self.conn.execute(
                 "UPDATE runs SET status = 'applying', finished_at = NULL WHERE id = ?",
                 (run_id,),
+            )
+            # These decisions are in this run's journal now, so a later
+            # follow-up run must not apply them a second time.
+            self.conn.execute(
+                """UPDATE conflicts SET decided_run_id = ?
+                   WHERE run_id = ? AND status = 'resolved'
+                     AND resolution IN ('digikam', 'memories')
+                     AND decided_run_id IS NULL""",
+                (run_id, run_id),
             )
             self.conn.commit()
 
@@ -702,13 +760,82 @@ class StateStore:
                 )
             self.conn.commit()
 
-    def save_conflicts(self, run_id: int, conflicts: list[dict[str, Any]]) -> None:
+    @staticmethod
+    def conflict_identity(conflict: dict[str, Any]) -> str:
+        """A key for the same disagreement seen in a later run.
+
+        The Memories detection is stable across renames on either side. When
+        it is missing, the photo and the two rectangles stand in for it.
+        """
+        file_id = conflict.get("nc_file_id")
+        detection_id = conflict.get("nc_detection_id")
+        if file_id is not None and detection_id is not None:
+            return f"detection:{int(file_id)}:{int(detection_id)}"
+        rects = json.dumps(
+            [conflict.get("digikam_rect"), conflict.get("nextcloud_rect")],
+            separators=(",", ":"),
+        )
+        return f"rect:{conflict.get('path', '')}:{rects}"
+
+    def save_conflicts(
+        self,
+        run_id: int,
+        conflicts: list[dict[str, Any]],
+        *,
+        close_unseen: bool = False,
+    ) -> dict[str, int]:
+        """Record this run's conflicts without re-asking settled questions.
+
+        A disagreement already open from an earlier run is refreshed, not
+        duplicated. When a full run no longer reports one, it was settled in
+        one of the libraries and is closed.
+        """
+        seen: dict[str, dict[str, Any]] = {}
+        for conflict in conflicts:
+            seen.setdefault(self.conflict_identity(conflict), conflict)
+        added = refreshed = closed = 0
         with self.lock:
-            self.conn.executemany(
-                "INSERT INTO conflicts(run_id, detail_json) VALUES (?, ?)",
-                [(run_id, json.dumps(conflict)) for conflict in conflicts],
-            )
+            rows = self.conn.execute(
+                """SELECT c.id, c.identity_key FROM conflicts c
+                   JOIN runs r ON r.id = c.run_id
+                   WHERE c.status = 'open'
+                     AND r.status IN ('previewed', 'applying', 'apply_failed')"""
+            ).fetchall()
+            open_keys = {str(row["identity_key"]): int(row["id"]) for row in rows}
+
+            for identity, conflict in seen.items():
+                existing = open_keys.get(identity)
+                if existing is not None:
+                    self.conn.execute(
+                        "UPDATE conflicts SET detail_json = ? WHERE id = ?",
+                        (json.dumps(conflict), existing),
+                    )
+                    refreshed += 1
+                    continue
+                self.conn.execute(
+                    """INSERT INTO conflicts(run_id, detail_json, identity_key)
+                       VALUES (?, ?, ?)""",
+                    (run_id, json.dumps(conflict), identity),
+                )
+                added += 1
+
+            if close_unseen:
+                gone = [
+                    conflict_id
+                    for identity, conflict_id in open_keys.items()
+                    if identity not in seen
+                ]
+                if gone:
+                    placeholders = ",".join("?" * len(gone))
+                    self.conn.execute(
+                        f"""UPDATE conflicts
+                            SET status = 'resolved', resolution = 'resolved_externally'
+                            WHERE id IN ({placeholders})""",
+                        gone,
+                    )
+                    closed = len(gone)
             self.conn.commit()
+        return {"added": added, "refreshed": refreshed, "closed": closed}
 
     def conflicts_for_run(self, run_id: int) -> dict[str, Any]:
         with self.lock:
@@ -765,8 +892,8 @@ class StateStore:
             ).fetchone()
             if row is None:
                 raise ValueError("Conflict not found.")
-            if row["status"] not in {"previewing", "previewed"}:
-                raise ValueError("Conflict decisions cannot change after Apply has started.")
+            if row["status"] in {"discarded", "superseded"}:
+                raise ValueError("This preview was discarded, so its faces are no longer offered.")
             self.conn.execute(
                 """UPDATE conflicts SET status = 'resolved', resolution = ?
                    WHERE id = ? AND run_id = ?""",
@@ -864,6 +991,150 @@ class StateStore:
             removed += cursor.rowcount or 0
             self.conn.commit()
         return removed
+
+    def plan_conflicts(self, run_id: int) -> dict[str, Any]:
+        """The decisions that belong in this run's plan, and only those.
+
+        Once a run has a journal its plan is frozen, so a decision made later
+        is left for a follow-up run rather than silently lengthening it.
+        """
+        with self.lock:
+            journalled = int(
+                self.conn.execute(
+                    "SELECT COUNT(*) FROM run_actions WHERE run_id = ?", (run_id,)
+                ).fetchone()[0]
+            )
+            if journalled:
+                rows = self.conn.execute(
+                    """SELECT id, detail_json, resolution FROM conflicts
+                       WHERE run_id = ? AND status = 'resolved' AND decided_run_id = ?
+                       ORDER BY id""",
+                    (run_id, run_id),
+                ).fetchall()
+            else:
+                rows = self.conn.execute(
+                    """SELECT id, detail_json, resolution FROM conflicts
+                       WHERE run_id = ? AND status = 'resolved'
+                         AND resolution IN ('digikam', 'memories')
+                         AND decided_run_id IS NULL
+                       ORDER BY id""",
+                    (run_id,),
+                ).fetchall()
+        conflicts = []
+        for row in rows:
+            item = json.loads(row["detail_json"] or "{}")
+            item.update({"id": int(row["id"]), "resolution": row["resolution"]})
+            conflicts.append(item)
+        return {"conflicts": conflicts, "remaining": 0, "total": len(conflicts)}
+
+    def pending_decisions(self) -> list[dict[str, Any]]:
+        """Settled conflicts that no run has applied yet."""
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT id, run_id, resolution, detail_json FROM conflicts
+                   WHERE status = 'resolved'
+                     AND resolution IN ('digikam', 'memories')
+                     AND decided_run_id IS NULL
+                   ORDER BY id"""
+            ).fetchall()
+        decisions = []
+        for row in rows:
+            item = json.loads(row["detail_json"] or "{}")
+            item.update(
+                {
+                    "id": int(row["id"]),
+                    "run_id": int(row["run_id"]),
+                    "resolution": str(row["resolution"]),
+                }
+            )
+            decisions.append(item)
+        return decisions
+
+    def mark_decisions_folded(self, conflict_ids: list[int], run_id: int) -> int:
+        if not conflict_ids:
+            return 0
+        placeholders = ",".join("?" * len(conflict_ids))
+        with self.lock:
+            cursor = self.conn.execute(
+                f"""UPDATE conflicts SET decided_run_id = ?
+                    WHERE id IN ({placeholders}) AND decided_run_id IS NULL""",
+                (run_id, *conflict_ids),
+            )
+            self.conn.commit()
+        return cursor.rowcount or 0
+
+    # -------------------------------------------------------------- ledger
+
+    def load_ledger(self) -> dict[tuple[int, int], str]:
+        """Every remembered agreement, keyed by its Memories detection."""
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT nextcloud_file_id, nextcloud_detection_id, synced_name
+                   FROM face_links
+                   WHERE profile_id = 1 AND synced_name IS NOT NULL
+                     AND nextcloud_detection_id IS NOT NULL"""
+            ).fetchall()
+        return {
+            (int(row["nextcloud_file_id"]), int(row["nextcloud_detection_id"])):
+                str(row["synced_name"])
+            for row in rows
+        }
+
+    def record_agreements(self, entries: list[dict[str, Any]]) -> None:
+        """Remember the agreed name for each face, replacing any earlier row.
+
+        Keyed on the Memories detection, because a rename changes the digiKam
+        tag id and would otherwise leave a stale second row behind.
+        """
+        if not entries:
+            return
+        with self.lock:
+            for entry in entries:
+                file_id = entry.get("nextcloud_file_id")
+                detection_id = entry.get("nextcloud_detection_id")
+                if file_id is None or detection_id is None:
+                    continue
+                self.conn.execute(
+                    """DELETE FROM face_links
+                       WHERE profile_id = 1
+                         AND nextcloud_file_id = ? AND nextcloud_detection_id = ?""",
+                    (int(file_id), int(detection_id)),
+                )
+                self.conn.execute(
+                    """INSERT INTO face_links(
+                           profile_id, digikam_image_id, digikam_tag_id,
+                           nextcloud_file_id, nextcloud_detection_id,
+                           digikam_name, nextcloud_name, digikam_rect_json,
+                           nextcloud_rect_json, synced_name, last_synced_at)
+                       VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                    (
+                        int(entry.get("digikam_image_id") or 0),
+                        entry.get("digikam_tag_id"),
+                        int(file_id),
+                        int(detection_id),
+                        str(entry.get("synced_name") or ""),
+                        str(entry.get("synced_name") or ""),
+                        json.dumps(entry.get("digikam_rect") or []),
+                        json.dumps(entry.get("nextcloud_rect") or []),
+                        str(entry.get("synced_name") or ""),
+                    ),
+                )
+            self.conn.commit()
+
+    def clear_ledger(self) -> int:
+        """Forget every agreement, so the next run learns them again."""
+        with self.lock:
+            cursor = self.conn.execute("DELETE FROM face_links WHERE profile_id = 1")
+            self.conn.commit()
+        return cursor.rowcount or 0
+
+    def ledger_size(self) -> int:
+        with self.lock:
+            return int(
+                self.conn.execute(
+                    "SELECT COUNT(*) FROM face_links WHERE profile_id = 1 AND synced_name IS NOT NULL"
+                ).fetchone()[0]
+            )
 
     # ------------------------------------------------------- service state
 

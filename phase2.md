@@ -613,7 +613,8 @@ Today only applied actions write links. The "already correct" pairs never do, so
 
 - Every preview writes or refreshes a ledger row for every matched pair that agrees (`skip` actions carry both ids already). Batched insert, one transaction per scan batch.
 - Every applied action writes its row as today.
-- **Baseline on upgrade.** The first phase 2 run, and the "Rebuild face ledger" button, run a preview whose only side effect is ledger rows for agreeing pairs. Disagreeing pairs at that moment still need one human decision each. After that the ledger carries the history.
+- **Baseline on upgrade.** Opening an existing state database adopts the links that phase 1 already wrote for every applied change. Those links record one agreed name under two columns, so they become ledger entries directly. On the development library that seeds 1,677 agreements before the first run.
+- **Rebuild.** The "Rebuild face ledger" button forgets everything and runs a full preview, which learns the agreements again. Pairs that disagree at that moment need one decision each.
 
 ### 8.4 Conflicts across runs
 
@@ -909,7 +910,10 @@ Done when: a fresh login starts the service; the desktop shortcut opens the inte
 **M2. Home, Settings, Activity.** New shell and rail. Setup only when needed. Sync now runs the existing job. Run detail folds the phase 1 screens. Settings page with the version 2 schema and migration. Pause and resume flags exist but only gate manual runs. Browser notifications and the title badge, including the channel choice in `/api/status`, since both are page code plus one status field. The Logs page, carried over from M1.
 Done when: a returning user lands on Home in the "in sync" or "ready to apply" state and can reach every phase 1 screen from Activity, and a conflict raised while the window is in the background produces one notification that opens the right screen.
 
-**M3. Ledger and conflicts.** Attribution rule in the engine, ledger writes for agreeing pairs, baseline run, conflict identity and cross-run deduplication, Needs attention inbox, plan split, `decisions` follow-up runs.
+**M3. Ledger and conflicts.** Attribution rule in the engine, ledger writes for agreeing pairs, upgrade seeding and rebuild, conflict identity and cross-run deduplication, Needs attention inbox, plan split, `decisions` follow-up runs.
+
+A decision can now be made at any time, including after its own run has finished. A run's plan is frozen once its journal exists, so a decision made later is carried by a follow-up run rather than lengthening a plan that is already being applied.
+
 Done when: renaming a person in Memories produces automatic digiKam reassignments and zero conflicts on the next manual run; the same conflict never appears twice in Needs attention.
 
 **M4. Resumable runs and the coordinator.** Preview checkpoints and `preview_actions`, `recover_unfinished_runs`, coordinator thread with gates, digiKam deferral including mid-apply detection, backoff, sleep detection.
@@ -924,7 +928,7 @@ Done when: a face renamed in digiKam is reflected in Memories within quiet perio
 
 ## 17. Risks and open points
 
-- **Ledger bootstrap.** The first phase 2 run after upgrade will surface every current disagreement as a conflict, once. This is expected and should be said on Home the first time: "Face Sync needs one round of decisions before it can tell which library changed."
+- **Ledger bootstrap.** The upgrade seeds the ledger from links phase 1 already wrote, so only faces Face Sync never touched can still surface as a conflict once. That is a much smaller set than first assumed, and the risk is correspondingly lower.
 - **Fingerprint checksum collisions** on the Memories side are theoretically possible. The fallback interval bounds the damage to one day.
 - **Recognize busy detection** depends on `oc_jobs.reserved_at` semantics, which are stable but undocumented. If Nextcloud changes them the gate degrades to "idle", which is the phase 1 behaviour.
 - **digiKam on another machine** writing to a shared database is invisible to the process probe. The write-lock probe catches an active transaction only. Documented, not solved.

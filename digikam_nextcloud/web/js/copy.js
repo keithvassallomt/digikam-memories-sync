@@ -5,6 +5,7 @@ import { ago, count, plural, timeOfDay, when } from './format.js';
 
 export const TRIGGERS = {
   manual: 'you',
+  decisions: 'your decisions',
   digikam_closed: 'digiKam closed',
   digikam_changed: 'digiKam changed',
   memories_changed: 'Memories changed',
@@ -39,7 +40,16 @@ export function changeCount(summary = {}) {
   return (
     Number(summary.assigned || 0) +
     Number(summary.inserted || 0) +
-    Number(summary.created_in_digikam || 0)
+    Number(summary.created_in_digikam || 0) +
+    Number(summary.reassigned_in_digikam || 0)
+  );
+}
+
+/** Changes that write to digiKam, which is what the close-digiKam rule needs. */
+export function digikamChangeCount(summary = {}) {
+  return (
+    Number(summary.created_in_digikam || 0) +
+    Number(summary.reassigned_in_digikam || 0)
   );
 }
 
@@ -121,7 +131,7 @@ export function subline(status) {
       return 'Everything else keeps syncing around them.';
     case 'waiting_digikam': {
       const summary = (status.run || {}).summary || {};
-      return `${plural(summary.created_in_digikam || 0, 'change', 'changes')} for digiKam will be applied when you quit digiKam.`;
+      return `${plural(digikamChangeCount(summary), 'change', 'changes')} for digiKam will be applied when you quit digiKam.`;
     }
     case 'ready': {
       const run = status.run || {};

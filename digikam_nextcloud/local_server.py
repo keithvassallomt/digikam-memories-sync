@@ -74,6 +74,8 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
         elif path == "/api/service":
             self._json(HTTPStatus.OK, self.server.app.service_info())
+        elif path == "/api/ledger":
+            self._json(HTTPStatus.OK, self.server.app.ledger_summary())
         elif path == "/api/notifications":
             self._json(
                 HTTPStatus.OK,
@@ -172,6 +174,10 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.server.app.update_notifications(payload))
             elif path == "/api/settings/retention":
                 self._json(HTTPStatus.OK, self.server.app.update_retention(payload))
+            elif path == "/api/decisions/apply":
+                self._json(HTTPStatus.OK, self.server.app.create_decisions_run())
+            elif path == "/api/ledger/rebuild":
+                self._json(HTTPStatus.ACCEPTED, self.server.app.rebuild_ledger())
             elif path == "/api/service/autostart":
                 self._json(HTTPStatus.OK, self.server.app.set_autostart(payload))
             elif path == "/api/shortcuts/install":

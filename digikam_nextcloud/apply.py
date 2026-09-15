@@ -9,22 +9,26 @@ from .names import person_names_match, sanitize_person_name
 from .paths import normalize_path
 
 
-MUTATION_ACTIONS = {"assign", "insert", "create_digikam"}
+MUTATION_ACTIONS = {"assign", "insert", "create_digikam", "reassign_digikam"}
 
 
 def build_apply_plan(result: dict[str, Any], conflicts: dict[str, Any]) -> list[dict[str, Any]]:
-    """Turn a frozen preview and its decisions into explicit target operations."""
+    """Turn a frozen preview and its decisions into explicit target operations.
+
+    Conflicts nobody has settled yet are left out rather than refused, so one
+    undecided face cannot hold back every other change in the run.
+    """
     summary = result.get("summary") or {}
     source_actions = result.get("actions") or []
-    expected = sum(int(summary.get(name, 0)) for name in ("assigned", "inserted", "created_in_digikam"))
+    expected = sum(
+        int(summary.get(name, 0))
+        for name in ("assigned", "inserted", "created_in_digikam", "reassigned_in_digikam")
+    )
     actual = sum(action.get("action") in MUTATION_ACTIONS for action in source_actions)
     if actual != expected:
         raise ValueError(
             "This preview does not contain every proposed change. Run a new preview before applying."
         )
-    if conflicts.get("remaining", 0):
-        raise ValueError("Resolve every conflict before applying changes.")
-
     plan: list[dict[str, Any]] = []
     for source in source_actions:
         kind = source.get("action")
@@ -34,48 +38,111 @@ def build_apply_plan(result: dict[str, Any], conflicts: dict[str, Any]) -> list[
             target, operation = "memories", "insert_memories"
         elif kind == "create_digikam":
             target, operation = "digikam", "create_digikam"
+        elif kind == "reassign_digikam":
+            target, operation = "digikam", "reassign_digikam"
         else:
             continue
         plan.append({"target": target, "operation": operation, **source})
 
-    for conflict in conflicts.get("conflicts", []):
-        if conflict.get("resolution") == "digikam":
-            plan.append(
-                {
-                    "target": "memories",
-                    "operation": "assign_memories",
-                    "source": "conflict",
-                    "path": conflict["path"],
-                    "person": conflict["digikam_person"],
-                    "old_person": conflict["nextcloud_person"],
-                    "rect": conflict["nextcloud_rect"],
-                    "digikam_rect": conflict["digikam_rect"],
-                    "nc_file_id": conflict.get("nc_file_id"),
-                    "nc_detection_id": conflict.get("nc_detection_id"),
-                    "digikam_image_id": conflict.get("digikam_image_id"),
-                    "digikam_tag_id": conflict.get("digikam_tag_id"),
-                }
-            )
-        elif conflict.get("resolution") == "memories":
-            plan.append(
-                {
-                    "target": "digikam",
-                    "operation": "reassign_digikam",
-                    "source": "conflict",
-                    "path": conflict["path"],
-                    "person": conflict["nextcloud_person"],
-                    "old_person": conflict["digikam_person"],
-                    "rect": conflict["digikam_rect"],
-                    "nextcloud_rect": conflict["nextcloud_rect"],
-                    "nc_file_id": conflict.get("nc_file_id"),
-                    "nc_detection_id": conflict.get("nc_detection_id"),
-                    "digikam_image_id": conflict.get("digikam_image_id"),
-                    "digikam_tag_id": conflict.get("digikam_tag_id"),
-                }
-            )
-        else:
-            raise ValueError("Every conflict needs a digiKam or Memories decision.")
+    plan.extend(conflict_plan_entries(conflicts.get("conflicts", [])))
     return plan
+
+
+def conflict_plan_entries(conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Turn settled decisions into target operations.
+
+    An undecided conflict is left out rather than refused, so one open
+    question cannot hold back every other change.
+    """
+    entries: list[dict[str, Any]] = []
+    for conflict in conflicts:
+        resolution = conflict.get("resolution")
+        if resolution not in {"digikam", "memories"}:
+            # Not settled yet. Leave it out and read nothing else from it.
+            continue
+        shared = {
+            "source": "conflict",
+            "path": conflict["path"],
+            "nc_file_id": conflict.get("nc_file_id"),
+            "nc_detection_id": conflict.get("nc_detection_id"),
+            "digikam_image_id": conflict.get("digikam_image_id"),
+            "digikam_tag_id": conflict.get("digikam_tag_id"),
+        }
+        if resolution == "digikam":
+            entries.append({
+                **shared,
+                "target": "memories",
+                "operation": "assign_memories",
+                "person": conflict["digikam_person"],
+                "old_person": conflict["nextcloud_person"],
+                "rect": conflict["nextcloud_rect"],
+                "digikam_rect": conflict["digikam_rect"],
+            })
+        else:
+            entries.append({
+                **shared,
+                "target": "digikam",
+                "operation": "reassign_digikam",
+                "person": conflict["nextcloud_person"],
+                "old_person": conflict["digikam_person"],
+                "rect": conflict["digikam_rect"],
+                "nextcloud_rect": conflict["nextcloud_rect"],
+            })
+    return entries
+
+
+def conflict_preview_actions(conflicts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a frozen preview containing only settled decisions.
+
+    A decision made after its own run finished cannot be added to that run's
+    journal, so it becomes a small follow-up run of its own.
+    """
+    actions: list[dict[str, Any]] = []
+    assigned = reassigned = 0
+    for conflict in conflicts:
+        if conflict.get("resolution") == "digikam":
+            assigned += 1
+            actions.append({
+                "action": "assign",
+                "path": conflict["path"],
+                "person": conflict["digikam_person"],
+                "old_person": conflict["nextcloud_person"],
+                "rect": conflict["nextcloud_rect"],
+                "digikam_rect": conflict["digikam_rect"],
+                "detail": "your decision: keep the digiKam name",
+                "nc_file_id": conflict.get("nc_file_id"),
+                "nc_detection_id": conflict.get("nc_detection_id"),
+                "digikam_image_id": conflict.get("digikam_image_id"),
+                "digikam_tag_id": conflict.get("digikam_tag_id"),
+            })
+        elif conflict.get("resolution") == "memories":
+            reassigned += 1
+            actions.append({
+                "action": "reassign_digikam",
+                "path": conflict["path"],
+                "person": conflict["nextcloud_person"],
+                "old_person": conflict["digikam_person"],
+                "rect": conflict["digikam_rect"],
+                "nextcloud_rect": conflict["nextcloud_rect"],
+                "detail": "your decision: keep the Memories name",
+                "nc_file_id": conflict.get("nc_file_id"),
+                "nc_detection_id": conflict.get("nc_detection_id"),
+                "digikam_image_id": conflict.get("digikam_image_id"),
+                "digikam_tag_id": conflict.get("digikam_tag_id"),
+            })
+    return {
+        "summary": {
+            "assigned": assigned,
+            "inserted": 0,
+            "created_in_digikam": 0,
+            "reassigned_in_digikam": reassigned,
+            "skipped": 0,
+            "conflicts": 0,
+        },
+        "actions": actions,
+        "conflicts": [],
+        "warnings": [],
+    }
 
 
 def plan_summary(plan: list[dict[str, Any]]) -> dict[str, int]:
