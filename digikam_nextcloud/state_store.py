@@ -799,19 +799,23 @@ class StateStore:
                 x, y, width, height = values
                 if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1 or y + height > 1:
                     raise ValueError("The adjusted face box must stay inside the photo.")
-                action = json.loads(row["action_json"])
-                if str(row["operation"]) == "insert_memories":
-                    action.setdefault("digikam_rect", action["rect"])
-                    action["confirmed_face"] = True
-                elif str(row["operation"]) == "create_digikam":
-                    action.setdefault("nextcloud_rect", action["rect"])
-                action["rect"] = values
-                self.conn.execute(
-                    """UPDATE run_actions SET status = 'pending', action_json = ?,
-                       result_json = '{"review":"adjusted"}', error = NULL
-                       WHERE id = ?""",
-                    (json.dumps(action), action_id),
-                )
+                self._queue_retry(action_id, str(row["operation"]),
+                                  json.loads(row["action_json"]), values)
+                if apply_to_remaining:
+                    # Every other rejected face keeps its own box. Only the one
+                    # on screen can have been adjusted.
+                    others = self.conn.execute(
+                        """SELECT id, operation, action_json FROM run_actions
+                           WHERE run_id = ? AND status = 'failed' AND id <> ?
+                             AND operation IN ('insert_memories','create_digikam')""",
+                        (run_id, action_id),
+                    ).fetchall()
+                    for candidate in others:
+                        action = json.loads(candidate["action_json"])
+                        self._queue_retry(
+                            int(candidate["id"]), str(candidate["operation"]), action,
+                            [float(value) for value in action["rect"]],
+                        )
             else:
                 if self._ignored_face_key(
                     {"operation": row["operation"], **json.loads(row["action_json"])}
@@ -843,6 +847,32 @@ class StateStore:
                     )
             self.conn.commit()
         return self.failure_review(run_id)
+
+    def _queue_retry(
+        self,
+        action_id: int,
+        operation: str,
+        action: dict[str, Any],
+        rect: list[float],
+    ) -> None:
+        """Put a rejected face back in the queue as a trusted digiKam box.
+
+        Marking it confirmed tells the Nextcloud app that the rectangle is
+        already the detection, so it derives a descriptor from the box instead
+        of asking its own detector to find a face there first.
+        """
+        if operation == "insert_memories":
+            action.setdefault("digikam_rect", action["rect"])
+            action["confirmed_face"] = True
+        elif operation == "create_digikam":
+            action.setdefault("nextcloud_rect", action["rect"])
+        action["rect"] = rect
+        self.conn.execute(
+            """UPDATE run_actions SET status = 'pending', action_json = ?,
+               result_json = '{"review":"adjusted"}', error = NULL
+               WHERE id = ?""",
+            (json.dumps(action), action_id),
+        )
 
     def failure_review(self, run_id: int) -> dict[str, Any]:
         failures = self.failed_apply_actions(run_id)

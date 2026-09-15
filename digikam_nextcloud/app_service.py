@@ -265,9 +265,13 @@ class AppService:
         digikam_changes = int(summary.get("created_in_digikam") or 0) + int(
             summary.get("reassigned_in_digikam") or 0
         )
+        # Work a run has journalled but not finished: reviewed faces, or a
+        # digiKam half held back.
+        applied_state = (run or {}).get("apply") or {}
+        pending_changes = int(applied_state.get("pending") or 0)
         blocks = bool(
             run
-            and run.get("status") == "previewed"
+            and run.get("status") in {"previewed", "deferred"}
             and digikam_changes > 0
             and running
         )
@@ -282,6 +286,7 @@ class AppService:
             paused=paused,
             digikam_running=running,
             digikam_blocks_apply=blocks,
+            pending_changes=pending_changes,
             service={"running": True, **published},
             unread=len(self.state.unread_notifications()),
             raise_notifications=self._route_notifications(),

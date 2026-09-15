@@ -75,10 +75,11 @@ situation that makes this worth having.
 It writes names in bulk with no review step, so it wants the ledger and the
 review screens proven first. Phase 2 gives both.
 
-## Bulk retry for rejected faces
+## Bulk retry for rejected faces — done
 
-The review screen already has "keep all remaining rejected faces where they
-are". It needs the opposite: add all remaining using their digiKam boxes.
+Built. The review screen's checkbox now applies to whichever choice you make,
+so "Add using this box" with it ticked adds every remaining rejected face,
+each keeping its own rectangle.
 
 One click would mark every remaining rejected face as a confirmed digiKam box,
 leave its rectangle alone, and put it back in the queue. Applying then sends

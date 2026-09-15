@@ -126,7 +126,12 @@ export function headline(status) {
 }
 
 function readyChanges(status) {
-  return changeCount((status.run || {}).summary || {});
+  const run = status.run || {};
+  // A run that has applied part of itself knows exactly what is left. A fresh
+  // preview has to be counted from what it found, plus the decisions made.
+  const pending = (run.apply || {}).pending;
+  if (pending) return pending;
+  return changeCount(run.summary || {}) + (run.conflicts_resolved || 0);
 }
 
 export function subline(status) {
@@ -150,6 +155,11 @@ export function subline(status) {
     }
     case 'ready': {
       const run = status.run || {};
+      const applied = (run.apply || {}).applied;
+      if (applied) {
+        return `${plural(applied, 'change was', 'changes were')} applied already. `
+          + 'The rest are waiting for you.';
+      }
       return `Preview finished ${when(run.finished_at || run.started_at)}.`;
     }
     case 'paused':

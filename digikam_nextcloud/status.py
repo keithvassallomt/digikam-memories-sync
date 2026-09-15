@@ -32,11 +32,17 @@ def choose_state(
     paused: bool,
     automation_enabled: bool,
     digikam_blocks_apply: bool,
+    pending_changes: int = 0,
 ) -> str:
     """Return the one headline state, highest priority first.
 
     Attention outranks a ready preview because conflicts have to be settled
     before the rest of that preview can be applied.
+
+    ``pending_changes`` covers a run that has already applied part of itself
+    and is holding the rest: faces you reviewed, or a digiKam half waiting for
+    digiKam to close. Those are as ready as a fresh preview and must not
+    disappear from the home screen.
     """
     if not configured:
         return SETUP
@@ -47,7 +53,7 @@ def choose_state(
         return SYNCING
     if attention_total:
         return ATTENTION
-    if status in READY_STATUSES:
+    if status in READY_STATUSES or pending_changes:
         return WAITING_DIGIKAM if digikam_blocks_apply else READY
     if paused:
         return PAUSED
@@ -67,6 +73,7 @@ def compute(
     paused: bool,
     digikam_running: bool,
     digikam_blocks_apply: bool,
+    pending_changes: int,
     service: dict[str, Any],
     unread: int,
     raise_notifications: list[dict[str, Any]],
@@ -81,6 +88,7 @@ def compute(
         paused=paused,
         automation_enabled=bool(automation.get("enabled")),
         digikam_blocks_apply=digikam_blocks_apply,
+        pending_changes=pending_changes,
     )
     return {
         "state": state,

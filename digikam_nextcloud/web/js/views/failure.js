@@ -3,7 +3,7 @@
 import { api } from '../api.js';
 import { dragRect, drawCrop, faceCrop, placeBox } from '../crop.js';
 import { button, card, h, replace } from '../dom.js';
-import { count } from '../format.js';
+import { count, plural } from '../format.js';
 
 const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
 
@@ -28,6 +28,7 @@ export function create({ go, refresh }) {
   let crop = null;
   let rect = null;
   let drag = null;
+  let outcome = null;
 
   element.append(body);
 
@@ -55,15 +56,33 @@ export function create({ go, refresh }) {
 
   function showFinished() {
     releasePhoto();
+    const waiting = (outcome || {}).pending || 0;
+    const kept = (outcome || {}).ignored || 0;
+    const runId = (outcome || {}).run_id;
     replace(body,
       h('h1', {}, 'Every rejected face is decided'),
-      h('p', { class: 'lead' }, 'Faces kept in one library are not offered again unless their name or box changes.'),
+      h('p', { class: 'lead' },
+        'Nothing has been changed yet. Faces kept in one library are not '
+        + 'offered again unless their name or box changes.'),
       card(
         h('p', { class: 'completion-mark', 'aria-hidden': 'true' }, '✓'),
-        h('h3', {}, 'Your decisions are saved')),
+        h('h3', {}, waiting
+          ? `${plural(waiting, 'face is', 'faces are')} ready to add`
+          : 'Your decisions are saved'),
+        kept
+          ? h('p', { class: 'muted' }, `${plural(kept, 'face', 'faces')} kept where they were.`)
+          : null),
       h('div', { class: 'actions' },
         button('Back to Home', { onClick: () => go('/') }),
-        button('Needs attention', { class: 'button button-primary', onClick: () => go('/attention') })));
+        waiting && runId !== undefined
+          // The work is done but nothing has been written. Offer the last step
+          // here rather than making people find it.
+          ? button(`Apply ${plural(waiting, 'reviewed face', 'reviewed faces')}`, {
+              class: 'button button-primary', onClick: () => go(`/runs/${runId}`),
+            })
+          : button('Needs attention', {
+              class: 'button button-primary', onClick: () => go('/attention'),
+            })));
   }
 
   function show(position) {
@@ -115,7 +134,7 @@ export function create({ go, refresh }) {
          h('small', {}, 'Remember this and do not offer the face again.')));
     const retry = h('button', {
       type: 'button', class: 'name-choice', disabled: !failure.reviewable,
-      onClick: () => resolve(failure, 'retry', false, message, [keep, retry]),
+      onClick: () => resolve(failure, 'retry', keepAll.checked, message, [keep, retry]),
     }, h('span', { 'aria-hidden': 'true' }, '☁'),
        h('span', {}, h('strong', {}, `Add to ${destination} using this box`),
          h('small', {}, 'Use the box shown, or adjust it first.')));
@@ -139,8 +158,10 @@ export function create({ go, refresh }) {
           failure.reviewable
             ? h('label', { class: 'check' }, keepAll,
                 h('span', {},
-                  h('strong', {}, 'Keep all remaining rejected faces where they are'),
-                  h('small', {}, 'They will be ignored in future syncs.')))
+                  h('strong', {}, `Do this for all ${count(failures.length)} remaining faces`),
+                  h('small', {},
+                    'Each one keeps its own box. Adding them trusts digiKam’s '
+                    + 'rectangle, which is how the one above just worked.')))
             : null)),
       message,
       h('div', { class: 'actions' },
@@ -184,9 +205,10 @@ export function create({ go, refresh }) {
     message.textContent = 'Saving choice…';
     message.className = 'message';
     try {
-      await api.post(`/api/runs/${failure.run_id}/failures/${failure.id}`, {
-        decision, rect, apply_to_remaining: decision === 'keep_source' && applyToRemaining,
+      const result = await api.post(`/api/runs/${failure.run_id}/failures/${failure.id}`, {
+        decision, rect, apply_to_remaining: applyToRemaining,
       });
+      outcome = { run_id: failure.run_id, ...result };
       const inbox = await api.get('/api/attention');
       failures = inbox.failures;
       refresh();
