@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 
 from .models import DigikamImage, FaceRegion, FileMatch, NextcloudFile
+from .names import person_names_match
 from .paths import apply_path_maps, normalize_path, strip_nc_files_prefix
 
 LOG = logging.getLogger(__name__)
@@ -181,3 +182,24 @@ def match_regions(
     unmatched_dk = [f for i, f in enumerate(dk_faces) if i not in used_dk]
     unmatched_nc = [f for j, f in enumerate(nc_faces) if j not in used_nc]
     return pairs, unmatched_dk, unmatched_nc
+
+
+def overlapping_same_person(
+    face: FaceRegion,
+    candidates: list[FaceRegion],
+    iou_threshold: float,
+) -> Optional[tuple[FaceRegion, float]]:
+    """Return the best overlapping candidate carrying the same person name.
+
+    Region matching is deliberately one-to-one. Some libraries can nevertheless
+    contain two overlapping rectangles for the same person. Once one rectangle
+    has been paired, this check lets the other one be treated as represented
+    instead of proposing a duplicate in the opposite library forever.
+    """
+    matches = [
+        (candidate, face.rect.iou(candidate.rect))
+        for candidate in candidates
+        if person_names_match(face.person, candidate.person)
+        and face.rect.iou(candidate.rect) >= iou_threshold
+    ]
+    return max(matches, key=lambda item: item[1], default=None)

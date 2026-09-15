@@ -6,7 +6,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from .constants import DEFAULT_SKIP_PERSONS
 from .digikam import DigikamDB
-from .matching import match_regions
+from .matching import match_regions, overlapping_same_person
 from .models import (
     NextcloudNamedFace,
     RegionAction,
@@ -134,6 +134,35 @@ def compare_memories_to_digikam(
                     )
 
             for memories_face in only_memories:
+                represented = overlapping_same_person(
+                    memories_face,
+                    image.faces,
+                    iou_threshold,
+                )
+                if represented is not None:
+                    digikam_face, iou = represented
+                    report.skipped += 1
+                    if len(report.actions) < max_actions:
+                        report.actions.append(
+                            RegionAction(
+                                action="skip",
+                                path=relative,
+                                person=memories_face.person,
+                                rect=memories_face.rect.as_tuple(),
+                                detail=(
+                                    "already represented by an overlapping "
+                                    "same-person digiKam face "
+                                    f"(IoU={iou:.2f})"
+                                ),
+                                nc_file_id=memories_face.nc_file_id,
+                                nc_detection_id=memories_face.nc_detection_id,
+                                nc_cluster_id=memories_face.nc_cluster_id,
+                                digikam_image_id=image.image_id,
+                                digikam_tag_id=digikam_face.digikam_tag_id,
+                                nc_file_name=memories_face.file_name,
+                            )
+                        )
+                    continue
                 report.created_in_digikam += 1
                 if len(report.actions) < max_actions:
                     report.actions.append(

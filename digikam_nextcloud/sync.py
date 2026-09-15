@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 
 from .constants import DEFAULT_SKIP_PERSONS
 from .digikam import DigikamDB
-from .matching import match_files, match_regions
+from .matching import match_files, match_regions, overlapping_same_person
 from .models import (
     NextcloudBackend,
     RegionAction,
@@ -225,6 +225,32 @@ def _process_match(
 
     for df in only_dk:
         dk_person = sanitize_person_name(df.person)
+        represented = overlapping_same_person(df, nc_faces, iou_threshold)
+        if represented is not None:
+            memories_face, iou = represented
+            report.skipped += 1
+            _record_action(
+                report,
+                RegionAction(
+                    action="skip",
+                    path=path,
+                    person=dk_person,
+                    rect=df.rect.as_tuple(),
+                    detail=(
+                        "already represented by an overlapping same-person "
+                        f"Memories face (IoU={iou:.2f})"
+                    ),
+                    nc_file_id=m.nextcloud.file_id,
+                    nc_detection_id=memories_face.nc_detection_id,
+                    nc_cluster_id=memories_face.nc_cluster_id,
+                    digikam_image_id=df.digikam_image_id,
+                    digikam_tag_id=df.digikam_tag_id,
+                    nc_dav_parent=memories_face.dav_parent,
+                    nc_file_name=memories_face.file_name,
+                ),
+                max_actions=max_actions,
+            )
+            continue
         if not insert_missing:
             report.skipped += 1
             continue

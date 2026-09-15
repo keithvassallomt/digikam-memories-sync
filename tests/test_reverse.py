@@ -123,6 +123,56 @@ class ReversePreviewTests(unittest.TestCase):
 
         self.assertEqual([path for path, _ in selected], ["one.jpg"])
 
+    def test_overlapping_duplicate_in_memories_is_not_proposed_for_digikam(self):
+        image = DigikamImage(
+            image_id=3,
+            name="photo.jpg",
+            relative_path="2026/photo.jpg",
+            full_path="/library/2026/photo.jpg",
+            width=1000,
+            height=800,
+            file_size=10,
+            unique_hash="",
+            faces=[
+                FaceRegion(
+                    person="Gail Vassallo",
+                    rect=Rect(0.1, 0.1, 0.2, 0.2),
+                    source="digikam",
+                    digikam_image_id=3,
+                    digikam_tag_id=8,
+                )
+            ],
+        )
+        remote = [
+            named_face(
+                1,
+                "Photos/2026/photo.jpg",
+                "Gail Vassallo",
+                Rect(0.1, 0.1, 0.2, 0.2),
+            ),
+            named_face(
+                2,
+                "Photos/2026/photo.jpg",
+                "Gail Vassallo",
+                Rect(0.12, 0.1, 0.2, 0.2),
+            ),
+        ]
+
+        report = compare_memories_to_digikam(
+            FakeDigikam([image]),
+            selected_memories_faces(
+                remote,
+                nextcloud_photos_path="Photos",
+                only_person=None,
+            ),
+            SyncReport(),
+        )
+
+        self.assertEqual(report.created_in_digikam, 0)
+        self.assertEqual(report.skipped, 1)
+        self.assertEqual(report.actions[0].action, "skip")
+        self.assertIn("already represented", report.actions[0].detail)
+
     def test_digikam_path_lookup_returns_photos_without_existing_faces(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "digikam4.db"
