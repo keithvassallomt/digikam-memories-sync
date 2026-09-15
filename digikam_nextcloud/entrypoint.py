@@ -69,11 +69,16 @@ def _service(argv: list[str]) -> int:
     parser.add_argument("--config-dir", type=Path)
     parser.add_argument("--port", type=int)
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Start up, do one pass of work, and exit. For checking a build.",
+    )
     args = parser.parse_args(argv)
 
     from .service import run_service
 
-    return run_service(args.config_dir, args.port, verbose=args.verbose)
+    return run_service(args.config_dir, args.port, verbose=args.verbose, once=args.once)
 
 
 def _autostart(argv: list[str]) -> int:

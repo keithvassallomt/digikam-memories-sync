@@ -18,9 +18,11 @@ tests/                         Python tests
 nextcloud-app/
   digikam_face_sync/           Separately installable Nextcloud app
 docs/
-  architecture.md              Product and service architecture
+  architecture.md              What the parts are and how they fit
+  install-nextcloud-app.md     Installing the companion app
   prototypes/                  UI prototypes, phase 1 and phase 2
 phase2.md                      Phase 2 design: automatic operation
+backlog.md                     What is next, and what was deferred
 sync_faces.py                  Current command-line entry point
 config.example.yaml            Development configuration example
 ```
@@ -47,6 +49,24 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 ```
 
+## Automatic operation
+
+Face Sync can keep both libraries in step without being asked. Turn it on in
+Settings, or at the end of first-run setup.
+
+It watches digiKam's database file and polls Nextcloud every few minutes. A
+change starts a wait rather than a sync, so twenty renames produce one sync
+afterwards instead of twenty while you work. The wait is capped an hour from
+the first change, so a busy library still syncs hourly.
+
+It waits for Recognize to finish its own work, and holds digiKam's half of a
+sync until you quit digiKam. Opening digiKam part way through stops the writes
+within a second and the rest waits.
+
+Face Sync remembers the name both libraries last agreed on for each face, so a
+rename in either one is applied to the other rather than queued as a question.
+Only a face renamed on both sides, or one with no history, waits for you.
+
 ## Commands
 
 ```bash
@@ -56,6 +76,7 @@ face-sync service                  # run the background service
 face-sync run --config config.yaml # one-off command-line sync
 face-sync autostart enable         # start Face Sync at login
 face-sync shortcuts install        # add it to the application menu
+face-sync service --once           # start up, do one pass, exit (build check)
 ```
 
 One service owns a configuration directory. It holds `service.lock` so a second
@@ -82,9 +103,21 @@ Settings are versioned. A version 1 file is upgraded in place on first load,
 with automatic sync left off so upgrading never starts changing libraries on
 its own.
 
-Command-line runs are previews unless `--apply` is supplied. The desktop
-release will not be marked usable until synchronization works in both
-directions.
+Command-line runs are previews unless `--apply` is supplied. The command line
+has no ledger, so it treats every disagreement as a conflict, which is the
+behaviour it has always had.
+
+## The Nextcloud companion app
+
+`nextcloud-app/digikam_face_sync` is installed separately from Recognize, so a
+Recognize update cannot overwrite it. Build its archive with
+`./build-nextcloud-app.sh`, and see `docs/install-nextcloud-app.md` for
+installing it.
+
+Version 0.5.0 adds two read-only endpoints Face Sync polls between syncs: a
+fingerprint of which person each named face belongs to, and whether Recognize
+is busy. An older version simply leaves change detection off, and Face Sync
+falls back to its daily check.
 
 The interface implements first-run setup, All/One-person selection, a read-only
 two-way preview, conflict decisions and an explicit Apply step. Close digiKam

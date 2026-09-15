@@ -127,6 +127,16 @@ class FakeApp:
         self.started = []
         self.applied = []
         self.busy = False
+        self.desktop_notifications = 0
+        self.retentions = 0
+
+    def deliver_desktop_notifications(self):
+        self.desktop_notifications += 1
+        return 0
+
+    def apply_retention(self):
+        self.retentions += 1
+        return {}
 
     def recognize_busy(self):
         return self.busy
@@ -225,6 +235,12 @@ class CoordinatorTest(unittest.TestCase):
         engine._digikam_free_since = engine.wall() - timedelta(minutes=1)
         engine.tick()
         self.assertEqual(self.app.resumed, [run_id])
+
+    def test_every_tick_offers_to_show_waiting_notifications(self):
+        engine = self.coordinator()
+        engine.tick()
+        engine.tick()
+        self.assertEqual(self.app.desktop_notifications, 2)
 
     def test_a_failing_resume_does_not_stop_the_coordinator(self):
         run_id = self.state.create_run("all")

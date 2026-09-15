@@ -852,9 +852,11 @@ One cosmetic cost is worth knowing before building this. Browsers label a notifi
 
 | Platform | Delivery |
 |---|---|
-| Linux | `notify-send` with app name and icon |
+| Linux | `notify-send`, with the app name, and critical urgency for connection problems |
 | macOS | `osascript -e 'display notification'` |
-| Windows | PowerShell toast via `Windows.UI.Notifications`, falling back to a balloon |
+| Windows | PowerShell toast via `Windows.UI.Notifications` |
+
+Every value is escaped for the shell language it lands in. A person named with an apostrophe or a quotation mark must not be able to change the command that runs.
 
 Click-to-open is **best effort** on this channel and deliberately not relied upon. A `notify-send` callback needs a blocking action listener, `osascript` offers no callback at all, and a Windows toast needs a registered application identity. Since the browser channel covers the case where the user is at the machine with Face Sync already open, the operating-system channel can stay a plain one-way message. A user who clicks a dead notification and opens Face Sync manually still lands on the inbox with everything waiting.
 
@@ -944,7 +946,15 @@ Measured on the development library: the digiKam fingerprint takes 10 ms over 13
 
 Done when: a face renamed in digiKam is reflected in Memories within quiet period + one check interval of closing digiKam, with no clicks.
 
-**M6. Polish.** Operating-system notifications per platform for the UI-closed case, retention jobs, run and log tail in run detail, `--once` smoke flag, README and architecture doc updates, HTML prototype replaced by screenshots.
+**M6. Polish.** Operating-system notifications per platform for the UI-closed case, retention jobs, run and log tail in run detail, `--once` smoke flag, README and architecture doc updates.
+
+The operating-system channel only acts once nothing has polled the status for ten seconds, so an open window always gets first refusal. A notification is marked delivered whether or not the platform accepted it, because a desktop that cannot show one must not make the same event repeat forever; the inbox still has it either way.
+
+Housekeeping does nothing on a service's first day. Deleting backups and logs within minutes of installing would be the wrong first impression, and the interval is measured from the first tick rather than from nothing.
+
+The prototype stays as it is rather than being replaced by screenshots of the real interface. It is the design record for the flow, it renders both themes on demand, and a screenshot would date faster than the page it replaced.
+
+Done when: a conflict raised with no window open produces one desktop notification; logs and backups are trimmed on schedule; and `face-sync service --once` starts, works and exits.
 
 ---
 

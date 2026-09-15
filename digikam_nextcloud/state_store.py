@@ -1327,6 +1327,36 @@ class StateStore:
                 self.conn.rollback()
                 raise
 
+    def prune_preview_actions(self, days: int = 90) -> int:
+        """Drop the proposed changes of long-finished runs.
+
+        The run and its summary stay; only the per-face detail goes, and only
+        for runs nothing can apply any more.
+        """
+        with self.lock:
+            cursor = self.conn.execute(
+                """DELETE FROM preview_actions WHERE run_id IN (
+                       SELECT id FROM runs
+                       WHERE status NOT IN ('queued', 'waiting', 'previewing',
+                                            'previewed', 'applying', 'deferred')
+                         AND COALESCE(finished_at, started_at) < datetime('now', ?)
+                   )""",
+                (f"-{max(1, int(days))} days",),
+            )
+            self.conn.commit()
+        return cursor.rowcount or 0
+
+    def protected_backups(self) -> set[str]:
+        """Backups belonging to runs that have not finished with them."""
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT a.backup_path FROM apply_runs a JOIN runs r ON r.id = a.run_id
+                   WHERE a.backup_path IS NOT NULL
+                     AND r.status IN ('applying', 'deferred', 'waiting',
+                                      'apply_failed', 'applied_with_issues')"""
+            ).fetchall()
+        return {str(row[0]) for row in rows if row[0]}
+
     def preview_actions(self, run_id: int) -> list[dict[str, Any]]:
         with self.lock:
             rows = self.conn.execute(

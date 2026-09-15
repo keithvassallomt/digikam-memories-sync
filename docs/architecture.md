@@ -1,89 +1,99 @@
 # Application architecture
 
-## Release boundary
+Face Sync keeps face names and rectangles in step between a local digiKam
+library and Nextcloud Memories/Recognize, in both directions, on its own.
 
-The first usable release synchronizes face names and rectangles in both
-directions between digiKam and Nextcloud Memories/Recognize. The interface may
-be developed against the existing one-way engine, but the application is not
-complete until Memories → digiKam changes work too.
+The phase 2 design document, `phase2.md`, carries the reasoning behind
+automatic operation. This file describes what the parts are and how they fit.
 
 ## Components
 
-- `digikam_nextcloud`: UI-independent Python engine, matching logic and
-  Nextcloud client.
-- Local service: owns schedules, filesystem watching, run state and the HTTP
-  API used by the browser UI.
-- Browser UI: the guided five-step workflow in the prototype.
-- `nextcloud-app/digikam_face_sync`: authenticated Nextcloud endpoint that
-  creates missing Recognize detections and descriptors.
-- State database: SQLite ledger for paired faces, previous values, run history,
-  conflict decisions and notifications.
+- `digikam_nextcloud`: the engine. Matching, the digiKam reader and writer, and
+  the Nextcloud client. Independent of any interface.
+- `service.py`: the long-running process. One per configuration directory, held
+  by an exclusive lock and published in `service.json`.
+- `coordinator.py`: decides what may run and when. Gates, triggers, resuming
+  interrupted work, housekeeping.
+- `triggers.py`: notices that a library changed and waits for the changes to
+  stop before asking for a sync.
+- `ledger.py`: remembers the name both libraries last agreed on for each face,
+  which is what lets a rename be applied rather than questioned.
+- `checkpoint.py`: writes a long run's findings and position down as it goes.
+- The browser interface under `web/`: plain ES modules, one per screen.
+- `nextcloud-app/digikam_face_sync`: the companion Nextcloud app. Creates
+  detections Recognize is missing, reads named faces, and reports a change
+  fingerprint and whether Recognize is busy.
+- The state database: runs, proposed changes, conflicts, the face ledger,
+  notifications, logs and service state.
 
-The application will expose `ui`, `run` and `service` modes. Closing the browser
-does not stop a scheduled run or filesystem watcher.
+## Modes
 
-## Connection checks
+| Command | What it is |
+|---|---|
+| `face-sync service` | The background process |
+| `face-sync ui` | Opens the interface, starting the service if needed |
+| `face-sync run` | One-off command-line sync |
+| `face-sync autostart` | Start at login, on all three platforms |
+| `face-sync shortcuts` | Application-menu entry |
 
-First-run setup performs these checks in order:
+Closing the browser does not stop anything. `face-sync service --once` starts
+up, does a single pass of work and exits, which is what a build check runs.
 
-1. Connect to the supplied Nextcloud URL with the username and app password.
-2. Probe the user's Recognize DAV `faces` collection. HTTP 404 means Recognize
-   is not installed or enabled and blocks setup.
-3. Probe `digikam_face_sync/api/v1/face-import`. If its advertised API is
-   missing, show an installation action. Until the app has a published page,
-   that action opens `https://keithvassallo.com`.
-4. Save the successful settings and credential.
+## How a sync happens
 
-## Two-way synchronization
+1. **Something changes.** digiKam is fingerprinted locally behind a
+   modification-time check; Memories is polled through the companion app. A
+   change starts a wait rather than a sync, and further changes push the wait
+   out, capped an hour from the first change.
+2. **The gates are checked.** Paused, automation off, Recognize busy, a job
+   already running, a connection backoff still counting down.
+3. **A preview runs.** Both libraries are read and compared. Nothing is
+   written. Each batch records what it found and how far it read, in one
+   transaction, so an interruption costs only the remaining work.
+4. **Disagreements are attributed.** The ledger says which library changed, so
+   a rename on one side becomes a change to the other. Only a face that moved
+   on both sides, or one with no history, becomes a question for a person.
+5. **The changes are applied**, if automatic apply is on. Memories first.
+   digiKam's half waits until digiKam is closed.
+6. **Anything left is put in the inbox**: names that disagree, and faces
+   Recognize rejected.
 
-Every paired face receives a ledger record containing its digiKam image and tag
-IDs, Nextcloud file and detection IDs, last-seen person names and rectangles,
-and the last successful sync revision. A later run can therefore tell which
-side changed. If both sides changed the same face, it becomes a conflict rather
-than silently choosing a winner.
+## Writing safely
 
-Automatic deletion propagation is outside the initial release. Missing records
-are reported for review.
-
-## Applying a preview
-
-Apply uses the action list saved by the preview together with the saved conflict
-decisions. It does not silently run a new comparison. Each target is read again
-immediately before it is changed; an unexpected name, rectangle or file ID is
-reported as stale rather than overwritten.
-
-Before local writes, Face Sync creates a consistent SQLite backup with the
-SQLite backup API, which includes committed WAL content. The UI requires the
-user to close digiKam and also detects a running digiKam process on Linux.
-Every operation is journalled separately. Completed operations are idempotent,
-so an interrupted run resumes with pending or failed entries and does not
-repeat completed changes.
-
-Photo-specific failures continue through the rest of Apply and enter a review
-queue. The queue shows the source face and supports an adjusted-rectangle retry
-or a persistent decision to keep the face in one library. Persistent decisions
-are keyed to the source path, person and rectangle, so editing the source face
-makes it eligible for review again.
+- **Frozen plan.** Apply executes the list the preview saved, never a fresh
+  comparison. A run's plan freezes once its journal exists; a decision made
+  after that is carried by a follow-up run.
+- **Verify before write.** Every action re-reads its target and refuses if the
+  name, rectangle or file id has moved since the preview.
+- **Backup first.** A consistent SQLite copy is made immediately before the
+  first digiKam write that actually happens, using the backup API so committed
+  write-ahead content is included.
+- **Never behind digiKam's back.** digiKam-side writes happen only while
+  digiKam is closed. Its opening stops them within a second. Each write also
+  checks for a database lock, which catches a digiKam running elsewhere.
+- **Idempotent journal.** Completed actions are recorded, so an interrupted
+  apply resumes with what is still pending and repeats nothing.
 
 ## Notifications
 
-The service emits structured events independently of the UI. Events are stored
-in SQLite before a desktop notification is attempted, so they remain visible
-in the in-app inbox and run history.
+Every event is recorded in the inbox first. Delivery beyond that uses one
+channel and only one:
 
-Initial event types are:
+| Situation | Channel |
+|---|---|
+| Window open and focused | none; the screen updates instead |
+| Window open, not focused, permission granted | the page raises it |
+| Window open, permission refused | the operating system |
+| Window closed | the operating system |
 
-- `run.completed`: for example, “Updated 262 face names and created 1,390 face
-  boxes.”
-- `run.no_changes`: both libraries already agree.
-- `conflicts.created`: for example, “12 conflicts need your attention.”
-- `run.failed`: connection, authentication or processing failure.
-- `apply.completed`: the approved changes were written to both libraries.
-- `apply.failed`: some approved changes failed or are waiting to resume.
-- `connection.action_required`: credentials or a required Nextcloud app need
-  attention.
+The tab title carries the count regardless, which needs no permission.
 
-Notifications are grouped by run. Their click target contains the run ID and
-opens the relevant result or conflict screen. Scheduled runs preview and notify
-by default; automatic application of unambiguous changes is an explicit user
-setting. Conflicts always wait for a person.
+## Deliberate limits
+
+- Deletions are not propagated. A missing face is reported, never removed.
+- Rectangle drift, where both sides agree on the name but not the box, is
+  detected and not synced.
+- One digiKam library and one Nextcloud account.
+- Clicking an operating-system notification does not open a particular screen.
+  No platform offers that without more machinery than it is worth, and the
+  browser channel covers the case where it matters.

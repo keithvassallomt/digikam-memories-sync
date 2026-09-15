@@ -21,6 +21,7 @@ from .digikam_writer import (
     terminate_digikam,
 )
 from . import checkpoint as checkpoint_module
+from . import desktop
 from . import coordinator as coordinator_module
 from . import notify, status as status_module
 from .apply import (
@@ -534,6 +535,78 @@ class AppService:
                 backend.close()
 
         return bool(self._cached("recognize_busy", 300.0, probe))
+
+    def deliver_desktop_notifications(self) -> int:
+        """Raise anything still unannounced, for when no window is open.
+
+        An open page gets first refusal through the status poll, so this only
+        acts once nothing has polled for a while.
+        """
+        if (time.monotonic() - self._client_seen) < notify.CLIENT_TIMEOUT_SECONDS:
+            return 0
+        pending = self.state.undelivered_notifications()
+        if not pending:
+            return 0
+        wanted = self.settings.load().get("notifications") or {}
+        sent = 0
+        for row in pending:
+            identifier = int(row["id"])
+            if not notify.is_enabled(str(row.get("event_type", "")), wanted):
+                self.state.assign_notification_channel([identifier], notify.SUPPRESSED)
+                continue
+            self.state.assign_notification_channel([identifier], notify.OPERATING_SYSTEM)
+            if desktop.send_notification(row):
+                sent += 1
+            # Marked either way. The inbox is the record; a desktop that
+            # cannot show one must not make it repeat forever.
+            self.state.mark_notifications_delivered([identifier])
+        if sent:
+            LOG.info("Showed %s desktop notifications", sent)
+        return sent
+
+    def prune_backups(self, keep: int) -> int:
+        """Keep the newest backups, and any a run might still need."""
+        folder = self.settings.root / "backups"
+        if not folder.is_dir():
+            return 0
+        try:
+            backups = sorted(
+                (path for path in folder.glob("*.db") if path.is_file()),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            LOG.exception("Could not list the backup folder")
+            return 0
+        protected = self.state.protected_backups()
+        removed = 0
+        for path in backups[max(0, int(keep)):]:
+            if str(path) in protected:
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                LOG.debug("Could not remove the backup %s", path)
+        if removed:
+            LOG.info("Removed %s old digiKam backups", removed)
+        return removed
+
+    def apply_retention(self) -> dict[str, int]:
+        """Housekeeping: old logs, old backups, old proposed changes."""
+        retention = self.settings.load().get("retention") or {}
+        result = {
+            "logs": self.state.delete_old_logs(
+                days=int(retention.get("log_days") or 30), debug_days=3
+            ),
+            "backups": self.prune_backups(int(retention.get("backups_keep") or 10)),
+            "preview_actions": self.state.prune_preview_actions(days=90),
+        }
+        LOG.info(
+            "Housekeeping removed %s log lines, %s backups and %s stored changes",
+            result["logs"], result["backups"], result["preview_actions"],
+        )
+        return result
 
     def invalidate_probes(self) -> None:
         """Forget cached answers. Used after a sleep, when they may be stale."""

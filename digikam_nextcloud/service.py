@@ -180,6 +180,7 @@ def run_service(
     port: int | None = None,
     *,
     verbose: bool = False,
+    once: bool = False,
     on_start: Callable[[Any], None] | None = None,
 ) -> int:
     """Run until stopped. Returns 3 when another service already holds the lock."""
@@ -232,6 +233,13 @@ def run_service(
                     pass
 
         coordinator = Coordinator(server.app)
+        if once:
+            # One pass and out. Used by the smoke test, so a change that breaks
+            # startup or the coordinator fails a build rather than a user.
+            LOG.info("Running a single coordinator pass")
+            coordinator.tick()
+            LOG.info("Single pass complete")
+            return 0
         coordinator.start()
 
         if on_start is not None:

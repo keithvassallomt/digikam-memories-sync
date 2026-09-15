@@ -19,6 +19,9 @@ from .triggers import TriggerWatcher
 LOG = logging.getLogger(__name__)
 
 TICK_SECONDS = 10.0
+# Housekeeping is not urgent; once a day is plenty.
+RETENTION_INTERVAL_HOURS = 24
+LAST_RETENTION_AT = "last_retention_at"
 # How long after digiKam disappears before its database is treated as free.
 DIGIKAM_SETTLE_SECONDS = 15.0
 # A wall-clock jump larger than this, with no matching monotonic time, is sleep.
@@ -147,6 +150,7 @@ class Coordinator:
         self.slept = False
         self.ticks = 0
         self.started_by_trigger: list[str] = []
+        self.notified = 0
 
     # ------------------------------------------------------------ lifecycle
 
@@ -210,6 +214,13 @@ class Coordinator:
             LOG.info("Resumed after sleep; rechecking before continuing")
             self.app.invalidate_probes()
 
+        # Anything nobody has been told about yet, when no window is open.
+        try:
+            self.notified += self.app.deliver_desktop_notifications()
+        except Exception:
+            LOG.exception("Could not show desktop notifications")
+        self.run_housekeeping()
+
         snapshot = self.snapshot()
         runs = self.app.state.runs_awaiting_work()
         decision = choose(runs, snapshot) if runs else Decision()
@@ -228,6 +239,23 @@ class Coordinator:
                 return decision
             self.consider_trigger(snapshot)
         return decision
+
+    def run_housekeeping(self) -> bool:
+        """Trim logs, backups and stored changes, about once a day."""
+        last = _parse(self.app.state.get_state(LAST_RETENTION_AT))
+        now = self.wall()
+        if last is not None and (now - last) < timedelta(hours=RETENTION_INTERVAL_HOURS):
+            return False
+        self.app.state.set_state(LAST_RETENTION_AT, now.isoformat())
+        if last is None:
+            # Not on the very first tick after installing; give the service a
+            # day of normal running before it starts deleting anything.
+            return False
+        try:
+            self.app.apply_retention()
+        except Exception:
+            LOG.exception("Housekeeping failed")
+        return True
 
     def consider_auto_apply(self, snapshot: Snapshot) -> bool:
         """Apply a finished preview that was asked to apply itself.
