@@ -16,7 +16,14 @@ from .settings import SettingsStore
 from .state_store import StateStore
 
 WEB_ROOT = Path(__file__).with_name("web")
-CONTENT_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
+CONTENT_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".woff2": "font/woff2",
+    ".json": "application/json; charset=utf-8",
+}
 LOG = logging.getLogger(__name__)
 
 
@@ -72,6 +79,20 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {"notifications": self.server.app.state.unread_notifications()},
             )
+        elif path == "/api/status":
+            self._json(HTTPStatus.OK, self.server.app.status(self._client_hint()))
+        elif path == "/api/attention":
+            self._json(HTTPStatus.OK, self.server.app.attention())
+        elif path == "/api/runs":
+            query = parse_qs(urlparse(self.path).query)
+            try:
+                limit = int((query.get("limit") or ["25"])[0])
+                before = query.get("before")
+                before_id = int(before[0]) if before and before[0] else None
+            except ValueError:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid activity request."})
+                return
+            self._json(HTTPStatus.OK, self.server.app.activity(limit, before_id))
         elif path == "/api/runs/latest":
             self._json(
                 HTTPStatus.OK,
@@ -135,6 +156,22 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.ACCEPTED, self.server.app.start_preview(payload))
             elif path == "/api/digikam/close":
                 self._json(HTTPStatus.OK, self.server.app.close_digikam())
+            elif path == "/api/sync":
+                self._json(HTTPStatus.ACCEPTED, self.server.app.start_sync(payload))
+            elif path == "/api/automation/pause":
+                self._json(HTTPStatus.OK, self.server.app.pause(payload))
+            elif path == "/api/automation/resume":
+                self._json(HTTPStatus.OK, self.server.app.resume())
+            elif path == "/api/notifications/delivered":
+                self._json(HTTPStatus.OK, self.server.app.notifications_delivered(payload))
+            elif path == "/api/notifications/read":
+                self._json(HTTPStatus.OK, self.server.app.mark_notifications_read(payload))
+            elif path == "/api/settings/automation":
+                self._json(HTTPStatus.OK, self.server.app.update_automation(payload))
+            elif path == "/api/settings/notifications":
+                self._json(HTTPStatus.OK, self.server.app.update_notifications(payload))
+            elif path == "/api/settings/retention":
+                self._json(HTTPStatus.OK, self.server.app.update_retention(payload))
             elif path == "/api/service/autostart":
                 self._json(HTTPStatus.OK, self.server.app.set_autostart(payload))
             elif path == "/api/shortcuts/install":
@@ -184,6 +221,14 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 {"error": "The operation failed. Check the Face Sync terminal for details."},
             )
 
+    def _client_hint(self) -> dict[str, Any]:
+        """What the page reports about itself, used to route notifications."""
+        query = parse_qs(urlparse(self.path).query)
+        return {
+            "visible": (query.get("visible") or ["false"])[0] == "true",
+            "permission": (query.get("permission") or ["default"])[0],
+        }
+
     def _log_filters(self) -> dict[str, Any]:
         """Read and bound the log query, rejecting anything unparseable."""
         query = parse_qs(urlparse(self.path).query)
@@ -223,16 +268,21 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
         return value
 
     def _static(self, path: str) -> None:
+        """Serve the interface's own files, and nothing else on the disk."""
         name = path.lstrip("/")
-        if name not in {"app.css", "app.js"}:
+        if not name or name.endswith("/"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
             return
-        file_path = WEB_ROOT / name
-        self._bytes(
-            HTTPStatus.OK,
-            file_path.read_bytes(),
-            CONTENT_TYPES[file_path.suffix],
-        )
+        try:
+            file_path = (WEB_ROOT / name).resolve()
+            file_path.relative_to(WEB_ROOT.resolve())
+        except (ValueError, OSError):
+            self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
+            return
+        if file_path.suffix not in CONTENT_TYPES or not file_path.is_file():
+            self._json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
+            return
+        self._bytes(HTTPStatus.OK, file_path.read_bytes(), CONTENT_TYPES[file_path.suffix])
 
     def _json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         self._bytes(

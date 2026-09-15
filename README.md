@@ -12,6 +12,8 @@ can resume without repeating completed changes.
 
 ```text
 digikam_nextcloud/             Python sync engine, service and HTTP client
+  web/                         Browser interface: index.html, css/, js/
+  web/js/views/                One module per screen
 tests/                         Python tests
 nextcloud-app/
   digikam_face_sync/           Separately installable Nextcloud app
@@ -63,6 +65,22 @@ address of the running one and exits with status 3.
 
 The service logs to `logs/face-sync.log` under the configuration directory and
 to the state database, so the interface can show logs without reading files.
+
+## The interface
+
+The browser interface is plain ES modules, no framework and no build step. The
+shell in `index.html` holds the rail; `js/main.js` routes between screens by
+hash and mounts one view at a time. Each screen is a module under `js/views/`
+that returns `{ element, enter, leave, update }`.
+
+Shared pieces sit beside them: `api.js` is the only place that talks to the
+service, `store.js` polls the status once for every screen, `copy.js` holds
+every sentence the interface says, and `crop.js` carries the face-box geometry
+the two review screens share.
+
+Settings are versioned. A version 1 file is upgraded in place on first load,
+with automatic sync left off so upgrading never starts changing libraries on
+its own.
 
 Command-line runs are previews unless `--apply` is supplied. The desktop
 release will not be marked usable until synchronization works in both

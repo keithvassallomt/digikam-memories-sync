@@ -4,9 +4,10 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+import time
 import logging
 import mimetypes
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from contextlib import closing
 from pathlib import Path
 from typing import Any, Callable
@@ -18,6 +19,7 @@ from .digikam_writer import (
     digikam_is_running,
     terminate_digikam,
 )
+from . import notify, status as status_module
 from .apply import ApplyExecutor, build_apply_plan, plan_summary
 from .nextcloud_http import NextcloudConnectionError, NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
@@ -102,6 +104,20 @@ class AppService:
         self.sync_function = sync_function
         self._job_lock = threading.Lock()
         self._jobs: dict[int, threading.Thread] = {}
+        # Polling the home screen must not scan /proc or stat files every time.
+        self._cache: dict[str, tuple[float, Any]] = {}
+        self._client_seen: float = 0.0
+        self._client_visible = False
+        self._client_can_notify = False
+
+    def _cached(self, key: str, seconds: float, produce: Callable[[], Any]) -> Any:
+        now = time.monotonic()
+        entry = self._cache.get(key)
+        if entry is not None and now - entry[0] < seconds:
+            return entry[1]
+        value = produce()
+        self._cache[key] = (now, value)
+        return value
 
     def public_settings(self) -> dict[str, Any]:
         return self.settings.public_settings()
@@ -163,6 +179,214 @@ class AppService:
             return shortcuts.install(self._explicit_config_dir())
         except OSError as error:
             raise ValueError(f"The shortcut could not be created: {error}") from error
+
+    # ----------------------------------------------------------- home status
+
+    def _paused_until(self) -> tuple[bool, str | None]:
+        """Whether a pause is in force, expiring it when its time has passed."""
+        value = self.state.get_state("paused_until")
+        if value is None:
+            return False, None
+        if value == "indefinite":
+            return True, None
+        try:
+            until = datetime.fromisoformat(str(value))
+        except ValueError:
+            self.state.clear_state("paused_until")
+            return False, None
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        if until <= datetime.now(timezone.utc):
+            self.state.clear_state("paused_until")
+            return False, None
+        return True, until.isoformat()
+
+    def _route_notifications(self) -> list[dict[str, Any]]:
+        """Assign each new notification to exactly one channel.
+
+        Called from the status poll because that is the moment the service
+        knows whether anybody is looking.
+        """
+        pending = self.state.undelivered_notifications()
+        if not pending:
+            return []
+        wanted = self.settings.load().get("notifications") or {}
+        attached = (time.monotonic() - self._client_seen) < notify.CLIENT_TIMEOUT_SECONDS
+        channel = notify.choose_channel(
+            client_attached=attached,
+            client_visible=self._client_visible,
+            client_can_notify=self._client_can_notify,
+        )
+        suppressed: list[int] = []
+        chosen: list[dict[str, Any]] = []
+        for row in pending:
+            event_type = str(row.get("event_type", ""))
+            if not notify.is_enabled(event_type, wanted) or channel == notify.SUPPRESSED:
+                suppressed.append(int(row["id"]))
+            else:
+                chosen.append(row)
+        self.state.assign_notification_channel(suppressed, notify.SUPPRESSED)
+        if not chosen:
+            return []
+        ids = [int(row["id"]) for row in chosen]
+        self.state.assign_notification_channel(ids, channel)
+        if channel != notify.BROWSER:
+            return []
+        return [notify.browser_payload(row) for row in chosen]
+
+    def digikam_running(self) -> bool:
+        return bool(self._cached("digikam_running", 3.0, digikam_is_running))
+
+    def status(self, client: dict[str, Any] | None = None) -> dict[str, Any]:
+        """One aggregate for the home screen, polled while the window is open."""
+        client = client or {}
+        self._client_seen = time.monotonic()
+        self._client_visible = bool(client.get("visible"))
+        self._client_can_notify = str(client.get("permission", "")) == "granted"
+
+        settings = self.settings.load()
+        configured = self.settings.is_configured()
+        run = self.state.latest_actionable_run() if configured else None
+        paused, paused_until = self._paused_until()
+        running = self.digikam_running()
+        summary = (run or {}).get("summary") or {}
+        digikam_changes = int(summary.get("created_in_digikam") or 0)
+        blocks = bool(
+            run
+            and run.get("status") == "previewed"
+            and digikam_changes > 0
+            and running
+        )
+        published = self._cached("service_published", 5.0, self._published_service)
+        return status_module.compute(
+            configured=configured,
+            settings=settings,
+            run=run,
+            attention=self.state.attention_counts(),
+            last_completed=self.state.last_completed_run(),
+            paused_until=paused_until,
+            paused=paused,
+            digikam_running=running,
+            digikam_blocks_apply=blocks,
+            service={"running": True, **published},
+            unread=len(self.state.unread_notifications()),
+            raise_notifications=self._route_notifications(),
+            now=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+
+    def _published_service(self) -> dict[str, Any]:
+        """What the interface may know about the service. Never the token."""
+        from .service import read_service_info
+
+        published = read_service_info(self._explicit_config_dir()) or {}
+        return {
+            key: value
+            for key, value in published.items()
+            if key in {"pid", "port", "started_at", "version"}
+        }
+
+    # -------------------------------------------------------------- activity
+
+    def activity(self, limit: int = 25, before_id: int | None = None) -> dict[str, Any]:
+        return self.state.recent_runs(limit=limit, before_id=before_id)
+
+    def attention(self) -> dict[str, Any]:
+        return self.state.attention()
+
+    def notifications_delivered(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw = payload.get("ids")
+        if not isinstance(raw, list):
+            raise ValueError("Send the notification ids that were shown.")
+        ids = [int(value) for value in raw]
+        return {"delivered": self.state.mark_notifications_delivered(ids)}
+
+    def mark_notifications_read(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw = payload.get("ids")
+        ids = [int(value) for value in raw] if isinstance(raw, list) else None
+        return {"read": self.state.mark_notifications_read(ids)}
+
+    # ------------------------------------------------------------ automation
+
+    def pause(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Stop automatic work until a moment, or until the user resumes."""
+        until = payload.get("until")
+        minutes = payload.get("minutes")
+        if until == "indefinite":
+            value: Any = "indefinite"
+        elif isinstance(minutes, (int, float)) and minutes > 0:
+            moment = datetime.now(timezone.utc) + timedelta(minutes=float(minutes))
+            value = moment.isoformat(timespec="seconds")
+        elif isinstance(until, str) and until:
+            try:
+                parsed = datetime.fromisoformat(until)
+            except ValueError as error:
+                raise ValueError("That pause time could not be understood.") from error
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            value = parsed.isoformat(timespec="seconds")
+        else:
+            raise ValueError("Say how long Face Sync should pause for.")
+        self.state.set_state("paused_until", value)
+        LOG.info("Automatic sync paused (%s)", value)
+        self.state.create_notification(
+            "automation.paused",
+            "Automatic sync paused",
+            "Nothing will change in either library until it resumes.",
+            "/",
+        )
+        paused, paused_until = self._paused_until()
+        return {"paused": paused, "paused_until": paused_until}
+
+    def resume(self) -> dict[str, Any]:
+        self.state.clear_state("paused_until")
+        LOG.info("Automatic sync resumed")
+        return {"paused": False, "paused_until": None}
+
+    def update_automation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._update_group("automation", payload, {
+            "enabled": bool,
+            "apply_automatically": bool,
+            "quiet_period_minutes": int,
+            "check_interval_minutes": int,
+            "fallback_interval_hours": int,
+        })
+
+    def update_notifications(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._update_group("notifications", payload, {
+            "decisions": bool, "connection": bool, "completed": bool,
+        })
+
+    def update_retention(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._update_group("retention", payload, {
+            "backups_keep": int, "log_days": int,
+        })
+
+    def _update_group(
+        self, group: str, payload: dict[str, Any], schema: dict[str, type]
+    ) -> dict[str, Any]:
+        """Accept only known keys, coerced to the type the group expects."""
+        values: dict[str, Any] = {}
+        for key, kind in schema.items():
+            if key not in payload:
+                continue
+            raw = payload[key]
+            if kind is bool:
+                if not isinstance(raw, bool):
+                    raise ValueError(f"{key} must be true or false.")
+                values[key] = raw
+            else:
+                try:
+                    number = int(raw)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"{key} must be a whole number.") from error
+                if number < 1:
+                    raise ValueError(f"{key} must be at least 1.")
+                values[key] = number
+        if not values:
+            raise ValueError("There was nothing to change.")
+        settings = self.settings.update_group(group, values)
+        LOG.info("Updated %s settings: %s", group, ", ".join(sorted(values)))
+        return {group: settings.get(group), "saved": True}
 
     def test_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         database = resolve_digikam_database(str(payload.get("digikam_library", "")))
@@ -235,11 +459,13 @@ class AppService:
         if not self.settings.load().get("digikam_db"):
             raise ValueError("Complete the connection setup first.")
         scope, person = self._preview_selection(payload)
+        trigger = str(payload.get("trigger") or "manual")
+        auto_apply = payload.get("auto_apply") is True
         with self._job_lock:
             active = [run_id for run_id, thread in self._jobs.items() if thread.is_alive()]
             if active:
                 raise ValueError(f"Preview {active[0]} is already running.")
-            run_id = self.state.create_run(scope)
+            run_id = self.state.create_run(scope, trigger=trigger, auto_apply=auto_apply)
             thread = threading.Thread(
                 target=self._preview_job,
                 args=(run_id, {"scope": scope, "person": person}),
@@ -249,6 +475,41 @@ class AppService:
             self._jobs[run_id] = thread
             thread.start()
         return {"run_id": run_id, "status": "previewing"}
+
+    def active_run_id(self) -> int | None:
+        with self._job_lock:
+            for run_id, thread in self._jobs.items():
+                if thread.is_alive():
+                    return run_id
+        return None
+
+    def start_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Start a sync, or hand back the one already running.
+
+        Asking twice is a normal thing for a person to do, so it attaches to
+        the running job rather than failing.
+        """
+        running = self.active_run_id()
+        if running is not None:
+            return {"run_id": running, "status": "previewing", "attached": True}
+        request = dict(payload)
+        request.setdefault("scope", "all")
+        if request.get("preview_only") is True:
+            request["auto_apply"] = False
+        else:
+            automation = self.settings.load().get("automation") or {}
+            request.setdefault(
+                "auto_apply",
+                bool(automation.get("enabled")) and bool(automation.get("apply_automatically")),
+            )
+        result = self.start_preview(request)
+        LOG.info(
+            "Started run %s (%s, %s)",
+            result["run_id"],
+            request.get("scope"),
+            request.get("person") or "everyone",
+        )
+        return {**result, "attached": False}
 
     def _preview_job(self, run_id: int, payload: dict[str, Any]) -> None:
         try:

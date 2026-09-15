@@ -112,7 +112,28 @@ CREATE TABLE IF NOT EXISTS log_entries (
 );
 CREATE INDEX IF NOT EXISTS log_entries_ts ON log_entries(ts);
 CREATE INDEX IF NOT EXISTS log_entries_run ON log_entries(run_id);
+CREATE TABLE IF NOT EXISTS service_state (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
+
+# Columns added after the first release. Existing databases are upgraded in
+# place, because CREATE TABLE IF NOT EXISTS cannot add a column.
+ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "runs": {
+        "trigger": "TEXT NOT NULL DEFAULT 'manual'",
+        "auto_apply": "INTEGER NOT NULL DEFAULT 0",
+        "waiting_reason": "TEXT",
+        "next_attempt_at": "TEXT",
+        "attempts": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "notifications": {
+        "channel": "TEXT",
+        "delivered_at": "TEXT",
+    },
+}
 
 
 class StateStore:
@@ -123,8 +144,21 @@ class StateStore:
         self.conn.row_factory = sqlite3.Row
         self.lock = threading.RLock()
         self.conn.executescript(SCHEMA)
+        self._add_missing_columns()
         self.conn.execute("INSERT OR IGNORE INTO profiles(id, name) VALUES (1, 'Default')")
         self.conn.commit()
+
+    def _add_missing_columns(self) -> None:
+        for table, columns in ADDED_COLUMNS.items():
+            existing = {
+                str(row["name"])
+                for row in self.conn.execute(f"PRAGMA table_info({table})")
+            }
+            for name, definition in columns.items():
+                if name not in existing:
+                    self.conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
+                    )
 
     def close(self) -> None:
         self.conn.close()
@@ -229,11 +263,19 @@ class StateStore:
             ).fetchone()
         return self.run(int(row[0])) if row is not None else None
 
-    def create_run(self, mode: str, status: str = "previewing") -> int:
+    def create_run(
+        self,
+        mode: str,
+        status: str = "previewing",
+        *,
+        trigger: str = "manual",
+        auto_apply: bool = False,
+    ) -> int:
         with self.lock:
             cursor = self.conn.execute(
-                "INSERT INTO runs(profile_id, mode, status) VALUES (1, ?, ?)",
-                (mode, status),
+                """INSERT INTO runs(profile_id, mode, status, trigger, auto_apply)
+                   VALUES (1, ?, ?, ?, ?)""",
+                (mode, status, trigger, int(auto_apply)),
             )
             run_id = int(cursor.lastrowid)
             self.conn.execute(
@@ -822,6 +864,221 @@ class StateStore:
             removed += cursor.rowcount or 0
             self.conn.commit()
         return removed
+
+    # ------------------------------------------------------- service state
+
+    def get_state(self, key: str, default: Any = None) -> Any:
+        """Read one durable service value, such as when a pause ends."""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT value_json FROM service_state WHERE key = ?", (key,)
+            ).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row[0])
+        except json.JSONDecodeError:
+            return default
+
+    def set_state(self, key: str, value: Any) -> None:
+        with self.lock:
+            self.conn.execute(
+                """INSERT INTO service_state(key, value_json, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value_json = excluded.value_json,
+                       updated_at = CURRENT_TIMESTAMP""",
+                (key, json.dumps(value)),
+            )
+            self.conn.commit()
+
+    def clear_state(self, key: str) -> None:
+        with self.lock:
+            self.conn.execute("DELETE FROM service_state WHERE key = ?", (key,))
+            self.conn.commit()
+
+    # ------------------------------------------------------------- activity
+
+    def recent_runs(self, limit: int = 25, before_id: int | None = None) -> dict[str, Any]:
+        """A page of run history, newest first, for the activity list."""
+        limit = max(1, min(200, int(limit)))
+        clause = "WHERE id < ?" if before_id is not None else ""
+        values: tuple[Any, ...] = (int(before_id), limit + 1) if before_id is not None else (limit + 1,)
+        with self.lock:
+            rows = self.conn.execute(
+                f"""SELECT id, mode, status, trigger, auto_apply, waiting_reason,
+                           started_at, finished_at, summary_json
+                    FROM runs {clause} ORDER BY id DESC LIMIT ?""",
+                values,
+            ).fetchall()
+        runs = []
+        for row in rows[:limit]:
+            item = dict(row)
+            item["summary"] = json.loads(item.pop("summary_json") or "{}")
+            item["auto_apply"] = bool(item["auto_apply"])
+            runs.append(item)
+        return {
+            "runs": runs,
+            "has_more": len(rows) > limit,
+            "oldest_id": runs[-1]["id"] if runs else None,
+        }
+
+    def run_counts(self) -> dict[str, int]:
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT status, COUNT(*) AS amount FROM runs GROUP BY status"
+            ).fetchall()
+        return {str(row["status"]): int(row["amount"]) for row in rows}
+
+    def last_completed_run(self) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.conn.execute(
+                """SELECT id, status, trigger, started_at, finished_at, summary_json
+                   FROM runs
+                   WHERE status IN ('applied', 'applied_with_issues', 'no_changes', 'previewed')
+                   ORDER BY COALESCE(finished_at, started_at) DESC, id DESC LIMIT 1"""
+            ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["summary"] = json.loads(item.pop("summary_json") or "{}")
+        return item
+
+    # ------------------------------------------------------------ attention
+
+    def open_conflicts(self, limit: int = 500) -> list[dict[str, Any]]:
+        """Unresolved conflicts from every run that can still be applied."""
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT c.id, c.run_id, c.detail_json, r.started_at
+                   FROM conflicts c JOIN runs r ON r.id = c.run_id
+                   WHERE c.status = 'open'
+                     AND r.status IN ('previewed', 'applying', 'apply_failed')
+                   ORDER BY c.run_id DESC, c.id
+                   LIMIT ?""",
+                (max(1, min(2000, int(limit))),),
+            ).fetchall()
+        conflicts = []
+        for row in rows:
+            item = json.loads(row["detail_json"] or "{}")
+            item.update(
+                {
+                    "id": int(row["id"]),
+                    "run_id": int(row["run_id"]),
+                    "status": "open",
+                    "resolution": None,
+                    "run_started_at": row["started_at"],
+                }
+            )
+            conflicts.append(item)
+        return conflicts
+
+    def reviewable_failures(self, limit: int = 500) -> list[dict[str, Any]]:
+        """Rejected faces from every run, newest run first."""
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT run_id FROM run_actions
+                   WHERE status = 'failed'
+                     AND operation IN ('insert_memories', 'create_digikam')
+                   GROUP BY run_id ORDER BY run_id DESC""",
+            ).fetchall()
+        failures: list[dict[str, Any]] = []
+        for row in rows:
+            for failure in self.failed_apply_actions(int(row["run_id"])):
+                if failure["reviewable"]:
+                    failure["run_id"] = int(row["run_id"])
+                    failures.append(failure)
+                if len(failures) >= limit:
+                    return failures
+        return failures
+
+    def attention(self) -> dict[str, Any]:
+        """Everything waiting on a person, across every run."""
+        conflicts = self.open_conflicts()
+        failures = self.reviewable_failures()
+        return {
+            "conflicts": conflicts,
+            "failures": failures,
+            "conflict_count": len(conflicts),
+            "failure_count": len(failures),
+            "total": len(conflicts) + len(failures),
+        }
+
+    def attention_counts(self) -> dict[str, int]:
+        """The counts alone, for the status poll."""
+        with self.lock:
+            conflicts = int(
+                self.conn.execute(
+                    """SELECT COUNT(*) FROM conflicts c JOIN runs r ON r.id = c.run_id
+                       WHERE c.status = 'open'
+                         AND r.status IN ('previewed', 'applying', 'apply_failed')"""
+                ).fetchone()[0]
+            )
+            failures = int(
+                self.conn.execute(
+                    """SELECT COUNT(*) FROM run_actions WHERE status = 'failed'
+                       AND operation IN ('insert_memories', 'create_digikam')"""
+                ).fetchone()[0]
+            )
+        return {
+            "conflicts": conflicts,
+            "failures": failures,
+            "total": conflicts + failures,
+        }
+
+    # -------------------------------------------------------- notifications
+
+    def undelivered_notifications(self) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT * FROM notifications
+                   WHERE delivered_at IS NULL AND channel IS NULL
+                   ORDER BY id"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def assign_notification_channel(self, ids: list[int], channel: str) -> None:
+        """Record which channel will carry each notification."""
+        if not ids:
+            return
+        stamp = "CURRENT_TIMESTAMP" if channel == "none" else "NULL"
+        placeholders = ",".join("?" * len(ids))
+        with self.lock:
+            self.conn.execute(
+                f"""UPDATE notifications SET channel = ?, delivered_at = {stamp}
+                    WHERE id IN ({placeholders})""",
+                (channel, *ids),
+            )
+            self.conn.commit()
+
+    def mark_notifications_delivered(self, ids: list[int]) -> int:
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        with self.lock:
+            cursor = self.conn.execute(
+                f"""UPDATE notifications SET delivered_at = CURRENT_TIMESTAMP
+                    WHERE id IN ({placeholders}) AND delivered_at IS NULL""",
+                ids,
+            )
+            self.conn.commit()
+        return cursor.rowcount or 0
+
+    def mark_notifications_read(self, ids: list[int] | None = None) -> int:
+        with self.lock:
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                cursor = self.conn.execute(
+                    f"""UPDATE notifications SET read_at = CURRENT_TIMESTAMP
+                        WHERE id IN ({placeholders}) AND read_at IS NULL""",
+                    ids,
+                )
+            else:
+                cursor = self.conn.execute(
+                    "UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE read_at IS NULL"
+                )
+            self.conn.commit()
+        return cursor.rowcount or 0
 
     def run(self, run_id: int) -> dict[str, Any] | None:
         with self.lock:

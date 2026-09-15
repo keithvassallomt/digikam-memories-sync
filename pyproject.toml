@@ -30,4 +30,9 @@ face-sync = "digikam_nextcloud.entrypoint:main"
 include = ["digikam_nextcloud*"]
 
 [tool.setuptools.package-data]
-digikam_nextcloud = ["web/*.html", "web/*.css", "web/*.js"]
+digikam_nextcloud = [
+  "web/*.html",
+  "web/css/*.css",
+  "web/js/*.js",
+  "web/js/views/*.js",
+]

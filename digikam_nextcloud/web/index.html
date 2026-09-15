@@ -5,245 +5,52 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="face-sync-token" content="__FACE_SYNC_TOKEN__">
   <title>Face Sync</title>
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/screens.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="logo" aria-hidden="true">◎</span><div><strong>Face Sync</strong><small>digiKam ↔ Memories</small></div></div>
-    <div class="connection"><span class="status-dot"></span><span id="connection-label">Setup required</span></div>
+    <button id="brand-home" class="brand" type="button">
+      <span class="logo" aria-hidden="true">◎</span>
+      <span class="brand-text">
+        <strong>Face Sync</strong>
+        <small>digiKam ↔ Memories</small>
+      </span>
+    </button>
+    <div class="connection">
+      <span id="status-dot" class="dot"></span>
+      <span id="status-text">Starting…</span>
+    </div>
   </header>
+
   <div class="shell">
-    <nav class="steps" aria-label="Setup progress">
-      <div class="step current"><span>1</span>Connect</div>
-      <div class="step"><span>2</span>Choose faces</div>
-      <div class="step"><span>3</span>Preview</div>
-      <div class="step"><span>4</span>Resolve conflicts</div>
-      <div class="step"><span>5</span>Apply</div>
+    <nav class="rail" aria-label="Sections">
+      <button class="rail-item" type="button" data-nav="home" data-route="/">
+        <span class="rail-icon" aria-hidden="true">⌂</span><span class="rail-label">Home</span>
+      </button>
+      <button class="rail-item" type="button" data-nav="activity">
+        <span class="rail-icon" aria-hidden="true">≡</span><span class="rail-label">Activity</span>
+      </button>
+      <button class="rail-item" type="button" data-nav="attention">
+        <span class="rail-icon" aria-hidden="true">!</span><span class="rail-label">Needs attention</span>
+        <span id="attention-badge" class="badge" hidden>0</span>
+      </button>
+      <button class="rail-item" type="button" data-nav="logs">
+        <span class="rail-icon" aria-hidden="true">▤</span><span class="rail-label">Logs</span>
+      </button>
+      <button class="rail-item" type="button" data-nav="settings">
+        <span class="rail-icon" aria-hidden="true">⚙</span><span class="rail-label">Settings</span>
+      </button>
+      <div class="rail-footer">
+        <span class="dot"></span>
+        <span id="service-note">Running in the background</span>
+      </div>
     </nav>
-    <main>
-      <section id="connect-screen" class="screen active">
-        <h1>Connect your photo libraries</h1>
-        <p class="lead">You only need to do this once. Face Sync saves these settings on this computer.</p>
-
-        <form id="setup-form">
-          <section class="card">
-            <div class="card-heading"><span class="card-icon" aria-hidden="true">▣</span><div><h2>digiKam library</h2><p>Choose the folder containing digiKam’s database.</p></div></div>
-            <label>Library folder
-              <div class="field-action"><input id="digikam-library" name="digikam_library" autocomplete="off" placeholder="/home/you/Photos" required><button id="discover-button" type="button" class="secondary">Find automatically</button></div>
-            </label>
-            <div id="digikam-result" class="inline-result" aria-live="polite"></div>
-          </section>
-
-          <section class="card">
-            <div class="card-heading"><span class="card-icon" aria-hidden="true">☁</span><div><h2>Nextcloud</h2><p>Use a Nextcloud app password. Your normal password is not needed.</p></div></div>
-            <div class="fields">
-              <label class="wide">Nextcloud address<input id="nextcloud-url" name="nextcloud_url" type="url" placeholder="https://cloud.example.com" required></label>
-              <label>Username<input id="nc-user" name="nc_user" autocomplete="username" required></label>
-              <label>App password<input id="password" name="password" type="password" autocomplete="current-password"><small id="password-help"></small></label>
-              <label class="wide">Photos folder in Nextcloud<input id="nc-photos-path" name="nc_photos_path" value="Photos" required></label>
-            </div>
-          </section>
-
-          <div id="message" class="message" aria-live="polite"></div>
-          <section id="install-card" class="card requirement" hidden>
-            <h2>Face Sync must be installed or updated in Nextcloud</h2>
-            <p>Recognize is working, but the companion Face Sync app is missing a required feature.</p>
-            <a id="install-link" class="button secondary" href="https://keithvassallo.com" target="_blank" rel="noopener">Open installation page</a>
-            <button id="check-again" class="secondary" type="button">Check again</button>
-          </section>
-          <div class="actions"><button id="test-button" class="secondary" type="button">Test connection</button><button id="save-button" class="primary" type="submit">Save and continue</button></div>
-        </form>
-      </section>
-
-      <section id="scope-screen" class="screen">
-        <h1>Whose faces should be checked?</h1>
-        <p class="lead">Compare named faces in both libraries before deciding what to change.</p>
-        <div class="scope-options">
-          <label class="scope-option"><input type="radio" name="scope" value="all"><strong>All faces</strong><span>Compare every named face in both libraries.</span></label>
-          <label class="scope-option"><input type="radio" name="scope" value="person" checked><strong>One person</strong><span>Choose one person for a quicker run.</span></label>
-        </div>
-        <div id="person-field" class="person-controls">
-          <label class="person-field">Person<select id="person-select" disabled><option value="">Loading people…</option></select></label>
-          <button id="retry-people-button" class="secondary" type="button" hidden>Try again</button>
-        </div>
-        <div id="scope-message" class="message" aria-live="polite"></div>
-        <div class="actions"><button id="back-button" class="secondary" type="button">Back to settings</button><button id="preview-button" class="primary" type="button">Preview changes</button></div>
-      </section>
-
-      <section id="scan-screen" class="screen">
-        <h1>Checking faces</h1>
-        <p id="scan-phase" class="lead">Preparing the photo list…</p>
-        <section class="card scan-card">
-          <div class="progress-heading"><strong id="progress-percent">Preparing…</strong><span id="progress-count">Counting photos</span></div>
-          <progress id="scan-progress" aria-label="Photo scan progress"></progress>
-          <div class="live-counts" aria-live="polite">
-            <span><strong id="live-matched">0</strong> matched</span>
-            <span><strong id="live-changes">0</strong> changes</span>
-            <span><strong id="live-conflicts">0</strong> conflicts</span>
-          </div>
-        </section>
-      </section>
-
-      <section id="preview-screen" class="screen">
-        <h1 id="preview-heading">Preview</h1>
-        <p class="lead">No changes were made. Review the result before anything is applied.</p>
-        <div class="notice">This preview checks both directions. Nothing has been changed.</div>
-        <div class="stats">
-          <div class="stat"><strong id="stat-correct">0</strong><span>Already correct</span></div>
-          <div class="stat"><strong id="stat-memories">0</strong><span>Changes for Memories</span></div>
-          <div class="stat"><strong id="stat-digikam">0</strong><span>Additions for digiKam</span></div>
-          <div class="stat"><strong id="stat-conflicts">0</strong><span>Need your decision</span></div>
-        </div>
-        <section class="card">
-          <h2>What the preview found</h2>
-          <ul class="results">
-            <li><span>Photos checked in digiKam</span><strong id="result-files">0</strong></li>
-            <li><span>Photos matched to Nextcloud</span><strong id="result-matched">0</strong></li>
-            <li><span>Photos not found in Nextcloud</span><strong id="result-unmatched">0</strong></li>
-            <li><span>Memories photos checked</span><strong id="result-memories-files">0</strong></li>
-            <li><span>Memories photos not found in digiKam</span><strong id="result-unmatched-digikam">0</strong></li>
-            <li><span>Name existing faces in Memories</span><strong id="result-assign">0</strong></li>
-            <li><span>Create face boxes in Memories</span><strong id="result-create-memories">0</strong></li>
-            <li><span>Create face boxes in digiKam</span><strong id="result-create-digikam">0</strong></li>
-            <li><span>Warnings</span><strong id="result-warnings">0</strong></li>
-          </ul>
-        </section>
-        <div class="actions"><button id="preview-back-button" class="secondary" type="button">Discard preview</button><button id="review-conflicts-button" class="primary" type="button">Continue to Apply</button></div>
-      </section>
-
-      <section id="conflict-screen" class="screen">
-        <div id="conflict-review">
-          <div class="conflict-heading">
-            <div><h1>Who is this?</h1><p id="conflict-lead" class="lead">Choose the correct name for the highlighted face.</p></div>
-            <strong id="conflict-position" class="conflict-position"></strong>
-          </div>
-          <div class="conflict-grid">
-            <div>
-              <div id="conflict-photo-frame" class="conflict-photo-frame">
-                <span id="photo-loading" class="photo-message">Loading photo…</span>
-                <img id="conflict-photo" alt="" hidden>
-                <canvas id="conflict-crop" width="960" height="720" role="img" aria-label="Zoomed conflict face" hidden></canvas>
-                <span id="digikam-face-box" class="face-box digikam-box" hidden><small id="digikam-box-label"></small></span>
-                <span id="memories-face-box" class="face-box memories-box" hidden><small id="memories-box-label"></small></span>
-              </div>
-              <p id="conflict-path" class="photo-caption"></p>
-              <p id="conflict-overlap" class="photo-caption"></p>
-            </div>
-            <div>
-              <button id="keep-digikam-button" class="name-choice" type="button" aria-pressed="false"><span><strong id="digikam-choice-name"></strong><small>Keep the name from digiKam</small></span></button>
-              <button id="keep-memories-button" class="name-choice" type="button" aria-pressed="false"><span><strong id="memories-choice-name"></strong><small>Keep the name from Memories</small></span></button>
-              <label class="apply-all"><input id="apply-all-conflicts" type="checkbox"><span><strong>Use this choice for all remaining conflicts</strong><small>Every unresolved conflict will receive the same choice.</small></span></label>
-            </div>
-          </div>
-          <div id="conflict-message" class="message" aria-live="polite"></div>
-          <div class="actions"><button id="conflict-back-button" class="secondary" type="button">Back</button></div>
-        </div>
-        <div id="conflict-complete" hidden>
-          <h1>Conflicts resolved</h1>
-          <p id="conflict-complete-message" class="lead"></p>
-          <section class="card"><p class="completion-mark" aria-hidden="true">✓</p><h2>Your decisions are saved</h2><p>Nothing has been changed in digiKam or Memories yet.</p></section>
-          <div class="actions"><button id="conflict-complete-back" class="secondary" type="button">Back to preview</button><button id="review-decisions-button" class="secondary" type="button">Review decisions</button><button id="conflict-apply-button" class="primary" type="button">Continue to Apply</button></div>
-        </div>
-      </section>
-
-      <section id="apply-screen" class="screen">
-        <div id="apply-review">
-          <h1>Ready to apply</h1>
-          <p class="lead">Review the final totals, then apply the changes to both libraries.</p>
-          <div class="stats apply-stats">
-            <div class="stat"><strong id="apply-total">0</strong><span>Total face changes</span></div>
-            <div class="stat"><strong id="apply-memories">0</strong><span>Changes in Memories</span></div>
-            <div class="stat"><strong id="apply-digikam">0</strong><span>Changes in digiKam</span></div>
-            <div class="stat"><strong id="apply-conflicts">0</strong><span>Decisions included</span></div>
-          </div>
-          <section id="backup-card" class="card backup-card">
-            <div class="card-heading"><span class="card-icon" aria-hidden="true">✓</span><div><h2>A digiKam backup is created automatically</h2><p>Face Sync makes a consistent database backup before the first local change.</p></div></div>
-          </section>
-          <section id="close-digikam-card" class="card close-card">
-            <h2>Close digiKam before continuing</h2>
-            <p>digiKam must be closed while Face Sync updates its face database.</p>
-            <div class="close-digikam-controls">
-              <label class="confirmation"><input id="digikam-closed" type="checkbox"><span>I have closed digiKam</span></label>
-              <button id="close-digikam-button" class="secondary" type="button" hidden>Close digiKam</button>
-            </div>
-          </section>
-          <div id="apply-message" class="message" aria-live="polite"></div>
-          <div class="actions"><button id="apply-back-button" class="secondary" type="button">Back</button><button id="apply-button" class="primary" type="button">Apply changes</button></div>
-        </div>
-
-        <div id="apply-progress-view" hidden>
-          <h1>Applying changes</h1>
-          <p id="apply-phase" class="lead">Preparing both libraries…</p>
-          <section class="card scan-card">
-            <div class="progress-heading"><strong id="apply-percent">Preparing…</strong><span id="apply-count">0 changes completed</span></div>
-            <progress id="apply-progress" aria-label="Apply progress"></progress>
-            <div class="live-counts" aria-live="polite">
-              <span><strong id="apply-completed-count">0</strong> completed</span>
-              <span><strong id="apply-failed-count">0</strong> failed</span>
-            </div>
-          </section>
-          <div class="notice">You may close this browser window. Apply will continue while Face Sync is running.</div>
-        </div>
-
-        <div id="apply-complete" hidden>
-          <h1 id="apply-complete-heading">Changes applied</h1>
-          <p id="apply-complete-lead" class="lead"></p>
-          <section class="card">
-            <p id="apply-completion-mark" class="completion-mark" aria-hidden="true">✓</p>
-            <h2 id="apply-complete-summary"></h2>
-            <p id="apply-backup-path" class="backup-path"></p>
-            <ul id="apply-errors" class="apply-errors" hidden></ul>
-          </section>
-          <div class="actions"><button id="new-sync-button" class="secondary" type="button">Start another sync</button><button id="retry-apply-button" class="primary" type="button" hidden>Review and retry</button></div>
-        </div>
-
-        <div id="failure-review" hidden>
-          <div id="failure-review-item">
-            <div class="conflict-heading">
-              <div><h1>Face needs a decision</h1><p id="failure-lead" class="lead"></p></div>
-              <strong id="failure-position" class="conflict-position"></strong>
-            </div>
-            <div class="conflict-grid">
-              <div>
-                <div id="failure-photo-frame" class="conflict-photo-frame editable-photo-frame">
-                  <span id="failure-photo-loading" class="photo-message">Loading photo…</span>
-                  <img id="failure-photo" alt="" hidden>
-                  <canvas id="failure-crop" width="960" height="720" role="img" aria-label="Face needing a decision" hidden></canvas>
-                  <div id="failure-face-box" class="face-box digikam-box editable-face-box" hidden>
-                    <small id="failure-box-label"></small>
-                    <i class="resize-handle top-left" data-corner="top-left"></i>
-                    <i class="resize-handle top-right" data-corner="top-right"></i>
-                    <i class="resize-handle bottom-left" data-corner="bottom-left"></i>
-                    <i class="resize-handle bottom-right" data-corner="bottom-right"></i>
-                  </div>
-                </div>
-                <p id="failure-path" class="photo-caption"></p>
-                <p class="photo-caption">If the box is wrong, drag it or resize it before adding the face.</p>
-              </div>
-              <div>
-                <section class="card failure-detail-card">
-                  <h2 id="failure-person"></h2>
-                  <p id="failure-location"></p>
-                  <p id="failure-reason"></p>
-                </section>
-                <button id="keep-source-button" class="name-choice" type="button"><span><strong id="keep-source-title">Keep only here</strong><small id="keep-source-detail"></small></span></button>
-                <button id="retry-face-button" class="name-choice" type="button"><span><strong id="retry-face-title">Add using this box</strong><small id="retry-face-detail">Use the box shown, or adjust it first.</small></span></button>
-                <label id="keep-all-failures-label" class="apply-all"><input id="keep-all-failures" type="checkbox"><span><strong>Keep all remaining rejected faces in their current library</strong><small>They will be ignored in future scans.</small></span></label>
-              </div>
-            </div>
-            <div id="failure-message" class="message" aria-live="polite"></div>
-            <div class="actions"><button id="failure-back-button" class="secondary" type="button">Back to results</button></div>
-          </div>
-          <div id="failure-review-complete" hidden>
-            <h1>Decisions saved</h1>
-            <p id="failure-complete-lead" class="lead"></p>
-            <section class="card"><p class="completion-mark" aria-hidden="true">✓</p><h2 id="failure-complete-summary"></h2><p>Faces kept in one library will not be offered again unless their name or box changes.</p></section>
-            <div class="actions"><button id="failure-finish-button" class="secondary" type="button">Start another sync</button><button id="failure-retry-button" class="primary" type="button">Apply reviewed faces</button></div>
-          </div>
-        </div>
-      </section>
-    </main>
+    <main id="screen"></main>
   </div>
-  <script src="/app.js"></script>
+
+  <script type="module" src="/js/main.js"></script>
 </body>
 </html>
