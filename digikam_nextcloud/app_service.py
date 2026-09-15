@@ -106,6 +106,64 @@ class AppService:
     def public_settings(self) -> dict[str, Any]:
         return self.settings.public_settings()
 
+    def _explicit_config_dir(self) -> Path | None:
+        """Pass the configuration directory on only when it is not the default.
+
+        A login entry that names a non-standard directory must keep naming it;
+        one using the default should not hard-code a path that may move.
+        """
+        from .settings import default_config_dir
+
+        root = Path(self.settings.root).resolve()
+        return None if root == default_config_dir().resolve() else root
+
+    def logs(self, **filters: Any) -> dict[str, Any]:
+        return self.state.logs(**filters)
+
+    def service_info(self) -> dict[str, Any]:
+        """What the interface shows about the background service itself."""
+        from . import autostart, shortcuts
+        from .service import read_service_info
+
+        published = read_service_info(self._explicit_config_dir()) or {}
+        try:
+            login = autostart.status()
+        except Exception:
+            LOG.exception("Could not read the autostart entry")
+            login = {"supported": False, "enabled": False, "mechanism": None, "path": None}
+        return {
+            "running": bool(published),
+            "pid": published.get("pid"),
+            "port": published.get("port"),
+            "started_at": published.get("started_at"),
+            "version": published.get("version"),
+            "config_dir": str(self.settings.root),
+            "autostart": login,
+            "shortcut": shortcuts.status(),
+        }
+
+    def set_autostart(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from . import autostart
+
+        wanted = payload.get("enabled")
+        if not isinstance(wanted, bool):
+            raise ValueError("Say whether Face Sync should start at login.")
+        directory = self._explicit_config_dir()
+        try:
+            result = autostart.enable(directory) if wanted else autostart.disable(directory)
+        except RuntimeError as error:
+            raise ValueError(str(error)) from error
+        LOG.info("Start at login turned %s", "on" if wanted else "off")
+        return {**result, "supported": True}
+
+    def install_shortcut(self) -> dict[str, Any]:
+        from . import shortcuts
+
+        try:
+            return shortcuts.install(self._explicit_config_dir())
+        except OSError as error:
+            raise ValueError(f"The shortcut could not be created: {error}") from error
+
     def test_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         database = resolve_digikam_database(str(payload.get("digikam_library", "")))
         user_id = str(payload.get("nc_user", "")).strip()

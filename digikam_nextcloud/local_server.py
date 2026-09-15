@@ -1,17 +1,14 @@
 """Local-only HTTP server for the desktop browser interface."""
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import secrets
-import threading
-import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .app_service import AppService, InvalidDigikamLibrary, discover_digikam_databases
 from .nextcloud_http import NextcloudConnectionError, RecognizeNotInstalledError
@@ -63,6 +60,13 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                     HTTPStatus.INTERNAL_SERVER_ERROR,
                     {"error": "People could not be loaded. Try again."},
                 )
+        elif path == "/api/logs":
+            try:
+                self._json(HTTPStatus.OK, self.server.app.logs(**self._log_filters()))
+            except ValueError as error:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+        elif path == "/api/service":
+            self._json(HTTPStatus.OK, self.server.app.service_info())
         elif path == "/api/notifications":
             self._json(
                 HTTPStatus.OK,
@@ -131,6 +135,10 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.ACCEPTED, self.server.app.start_preview(payload))
             elif path == "/api/digikam/close":
                 self._json(HTTPStatus.OK, self.server.app.close_digikam())
+            elif path == "/api/service/autostart":
+                self._json(HTTPStatus.OK, self.server.app.set_autostart(payload))
+            elif path == "/api/shortcuts/install":
+                self._json(HTTPStatus.OK, self.server.app.install_shortcut())
             elif path.startswith("/api/runs/"):
                 parts = path.strip("/").split("/")
                 if len(parts) == 4 and parts[3] == "apply":
@@ -175,6 +183,32 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"error": "The operation failed. Check the Face Sync terminal for details."},
             )
+
+    def _log_filters(self) -> dict[str, Any]:
+        """Read and bound the log query, rejecting anything unparseable."""
+        query = parse_qs(urlparse(self.path).query)
+
+        def single(name: str) -> str | None:
+            values = query.get(name)
+            return values[0] if values else None
+
+        def number(name: str) -> int | None:
+            raw = single(name)
+            if raw in (None, ""):
+                return None
+            try:
+                return int(raw)
+            except ValueError as error:
+                raise ValueError(f"{name} must be a whole number.") from error
+
+        return {
+            "level": single("level") or None,
+            "run_id": number("run_id"),
+            "query": single("q") or None,
+            "after_id": number("after_id"),
+            "before_id": number("before_id"),
+            "limit": number("limit") or 200,
+        }
 
     def _authorized(self) -> bool:
         return self.headers.get("X-Face-Sync-Token", "") == self.server.api_token
@@ -230,23 +264,3 @@ def create_server(config_dir: Path | None = None, port: int = 0) -> FaceSyncHTTP
     state.recover_interrupted_applies()
     return FaceSyncHTTPServer(("127.0.0.1", port), AppService(settings, state))
 
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the Face Sync desktop interface")
-    parser.add_argument("--port", type=int, default=0)
-    parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--config-dir", type=Path)
-    args = parser.parse_args(argv)
-    server = create_server(args.config_dir, args.port)
-    url = f"http://127.0.0.1:{server.server_port}/"
-    print(f"Face Sync is running at {url}")
-    if not args.no_browser:
-        threading.Timer(0.2, webbrowser.open, args=(url,)).start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.app.state.close()
-        server.server_close()
-    return 0

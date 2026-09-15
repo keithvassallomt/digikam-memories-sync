@@ -900,10 +900,13 @@ Counts are current at the moment of delivery, not at the moment the event was re
 
 Each milestone is shippable on its own and leaves phase 1 behaviour intact.
 
-**M1. Service foundation.** `service.py`, lock, `service.json`, `face-sync ui` launcher, autostart install for the three platforms, shortcuts, file and SQLite logging, Logs page. No change to sync behaviour.
-Done when: a fresh login starts the service; the desktop shortcut opens the UI; the Logs page shows a manual run.
+**M1. Service foundation.** `service.py`, lock, `service.json`, `face-sync ui` launcher, autostart install for the three platforms, shortcuts, file and SQLite logging, and the `/api/logs` and `/api/service` endpoints. No change to sync behaviour.
 
-**M2. Home, Settings, Activity.** New shell and rail. Setup only when needed. Sync now runs the existing job. Run detail folds the phase 1 screens. Settings page with the version 2 schema and migration. Pause and resume flags exist but only gate manual runs. Browser notifications and the title badge, including the channel choice in `/api/status`, since both are page code plus one status field.
+The Logs *page* moves to M2. The shell that would host it is replaced there, and building a sixth entry into a five-step wizard rail would only be thrown away.
+
+Done when: a fresh login starts the service; the desktop shortcut opens the interface; a second service refuses to start; and the log endpoint returns the lines a manual run wrote.
+
+**M2. Home, Settings, Activity.** New shell and rail. Setup only when needed. Sync now runs the existing job. Run detail folds the phase 1 screens. Settings page with the version 2 schema and migration. Pause and resume flags exist but only gate manual runs. Browser notifications and the title badge, including the channel choice in `/api/status`, since both are page code plus one status field. The Logs page, carried over from M1.
 Done when: a returning user lands on Home in the "in sync" or "ready to apply" state and can reach every phase 1 screen from Activity, and a conflict raised while the window is in the background produces one notification that opens the right screen.
 
 **M3. Ledger and conflicts.** Attribution rule in the engine, ledger writes for agreeing pairs, baseline run, conflict identity and cross-run deduplication, Needs attention inbox, plan split, `decisions` follow-up runs.

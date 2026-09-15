@@ -11,13 +11,14 @@ can resume without repeating completed changes.
 ## Repository layout
 
 ```text
-digikam_nextcloud/             Python sync engine and HTTP client
+digikam_nextcloud/             Python sync engine, service and HTTP client
 tests/                         Python tests
 nextcloud-app/
   digikam_face_sync/           Separately installable Nextcloud app
 docs/
   architecture.md              Product and service architecture
-  prototypes/face-sync-ui.html Guided UI prototype
+  prototypes/                  UI prototypes, phase 1 and phase 2
+phase2.md                      Phase 2 design: automatic operation
 sync_faces.py                  Current command-line entry point
 config.example.yaml            Development configuration example
 ```
@@ -42,9 +43,26 @@ The HTTP client checks the server during connection:
 ```bash
 python -m pip install -e .
 python -m unittest discover -s tests -v
-face-sync                         # guided local interface
-face-sync run --config config.yaml # current command-line sync
 ```
+
+## Commands
+
+```bash
+face-sync                          # open the interface, starting the service if needed
+face-sync ui --foreground          # run the service in this terminal instead
+face-sync service                  # run the background service
+face-sync run --config config.yaml # one-off command-line sync
+face-sync autostart enable         # start Face Sync at login
+face-sync shortcuts install        # add it to the application menu
+```
+
+One service owns a configuration directory. It holds `service.lock` so a second
+copy cannot start, and publishes its port and session token in `service.json`
+so the launcher and shortcuts can find it. Starting a second service prints the
+address of the running one and exits with status 3.
+
+The service logs to `logs/face-sync.log` under the configuration directory and
+to the state database, so the interface can show logs without reading files.
 
 Command-line runs are previews unless `--apply` is supplied. The desktop
 release will not be marked usable until synchronization works in both

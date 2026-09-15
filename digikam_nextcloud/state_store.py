@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 
+LOG_LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS profiles (
@@ -100,6 +102,16 @@ CREATE TABLE IF NOT EXISTS ignored_faces (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(profile_id, source, path, person, rect_json)
 );
+CREATE TABLE IF NOT EXISTS log_entries (
+    id INTEGER PRIMARY KEY,
+    ts TEXT NOT NULL,
+    level TEXT NOT NULL,
+    logger TEXT NOT NULL,
+    run_id INTEGER,
+    message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS log_entries_ts ON log_entries(ts);
+CREATE INDEX IF NOT EXISTS log_entries_run ON log_entries(run_id);
 """
 
 
@@ -726,6 +738,90 @@ class StateStore:
                 )
             self.conn.commit()
         return self.conflicts_for_run(run_id)
+
+    def append_logs(
+        self, rows: list[tuple[str, str, str, int | None, str]]
+    ) -> None:
+        """Insert a batch of log records. Called only by the log writer thread."""
+        if not rows:
+            return
+        with self.lock:
+            self.conn.executemany(
+                """INSERT INTO log_entries(ts, level, logger, run_id, message)
+                   VALUES (?, ?, ?, ?, ?)""",
+                rows,
+            )
+            self.conn.commit()
+
+    def logs(
+        self,
+        *,
+        level: str | None = None,
+        run_id: int | None = None,
+        query: str | None = None,
+        before_id: int | None = None,
+        after_id: int | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Return a page of log entries, newest first.
+
+        ``level`` selects that level and everything more severe. ``after_id``
+        returns only newer entries, which is how the interface follows a live
+        run without re-reading the page it already has.
+        """
+        limit = max(1, min(1000, int(limit)))
+        clauses: list[str] = []
+        values: list[Any] = []
+        if level:
+            ranked = LOG_LEVELS.get(level.upper())
+            if ranked is None:
+                raise ValueError("Unknown log level.")
+            wanted = [name for name, rank in LOG_LEVELS.items() if rank >= ranked]
+            clauses.append(f"level IN ({','.join('?' * len(wanted))})")
+            values.extend(wanted)
+        if run_id is not None:
+            clauses.append("run_id = ?")
+            values.append(int(run_id))
+        if query:
+            clauses.append("message LIKE ? ESCAPE '\\'")
+            escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            values.append(f"%{escaped}%")
+        if before_id is not None:
+            clauses.append("id < ?")
+            values.append(int(before_id))
+        if after_id is not None:
+            clauses.append("id > ?")
+            values.append(int(after_id))
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self.lock:
+            rows = self.conn.execute(
+                f"SELECT * FROM log_entries {where} ORDER BY id DESC LIMIT ?",
+                (*values, limit + 1),
+            ).fetchall()
+        entries = [dict(row) for row in rows[:limit]]
+        return {
+            "entries": entries,
+            "has_more": len(rows) > limit,
+            "oldest_id": entries[-1]["id"] if entries else None,
+            "newest_id": entries[0]["id"] if entries else None,
+        }
+
+    def delete_old_logs(self, *, days: int = 30, debug_days: int = 3) -> int:
+        """Apply the retention policy. Debug lines go sooner than the rest."""
+        with self.lock:
+            cursor = self.conn.execute(
+                "DELETE FROM log_entries WHERE ts < datetime('now', ?)",
+                (f"-{max(0, int(days))} days",),
+            )
+            removed = cursor.rowcount or 0
+            cursor = self.conn.execute(
+                """DELETE FROM log_entries WHERE level = 'DEBUG'
+                   AND ts < datetime('now', ?)""",
+                (f"-{max(0, int(debug_days))} days",),
+            )
+            removed += cursor.rowcount or 0
+            self.conn.commit()
+        return removed
 
     def run(self, run_id: int) -> dict[str, Any] | None:
         with self.lock:
