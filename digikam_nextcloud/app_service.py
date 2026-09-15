@@ -253,6 +253,8 @@ class AppService:
         review = self.apply_review(run_id)
         if review["status"] == "applied":
             return self.preview_status(run_id)
+        if review["total"] == 0:
+            raise ValueError("There are no changes to apply.")
         if review["requires_digikam_closed"]:
             if payload.get("digikam_closed") is not True:
                 raise ValueError("Confirm that digiKam is closed before applying changes.")

@@ -144,6 +144,33 @@ class AppFoundationTests(unittest.TestCase):
         finally:
             state.close()
 
+    def test_zero_change_preview_cannot_start_apply(self):
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        state = StateStore(self.root / "state.sqlite3")
+        try:
+            run_id = state.create_run("person")
+            state.save_result(
+                run_id,
+                {
+                    "run_id": run_id,
+                    "summary": {
+                        "assigned": 0,
+                        "inserted": 0,
+                        "created_in_digikam": 0,
+                    },
+                    "actions": [],
+                },
+            )
+            state.finish_run(run_id, "previewed", {})
+            service = AppService(settings, state)
+
+            with self.assertRaisesRegex(ValueError, "There are no changes to apply"):
+                service.start_apply(run_id, {})
+
+            self.assertEqual(state.run(run_id)["status"], "previewed")
+        finally:
+            state.close()
+
     def test_conflict_choices_are_persisted_and_can_resolve_all_remaining(self):
         state = StateStore(self.root / "state.sqlite3")
         try:

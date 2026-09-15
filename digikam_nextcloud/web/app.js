@@ -214,10 +214,18 @@ function showPreview(result) {
   document.getElementById('result-create-digikam').textContent = summary.created_in_digikam.toLocaleString();
   document.getElementById('result-warnings').textContent = result.warnings.length.toLocaleString();
   const reviewButton = document.getElementById('review-conflicts-button');
+  const changeCount = summary.assigned + summary.inserted + summary.created_in_digikam;
   reviewButton.disabled = false;
-  reviewButton.textContent = summary.conflicts
-    ? `Review ${summary.conflicts.toLocaleString()} conflicts`
-    : 'Continue to Apply';
+  if (summary.conflicts) {
+    reviewButton.dataset.action = 'conflicts';
+    reviewButton.textContent = `Review ${summary.conflicts.toLocaleString()} conflicts`;
+  } else if (changeCount) {
+    reviewButton.dataset.action = 'apply';
+    reviewButton.textContent = 'Continue to Apply';
+  } else {
+    reviewButton.dataset.action = 'close';
+    reviewButton.textContent = 'Close';
+  }
   activateScreen('preview-screen');
   steps[1].classList.add('done');
   steps[1].classList.remove('current');
@@ -501,20 +509,24 @@ document.getElementById('preview-button').addEventListener('click', async (event
   }
 });
 
+async function discardCurrentPreview() {
+  if (currentRunId !== null) {
+    await api(`/api/runs/${currentRunId}/discard`, { method: 'POST', body: '{}' });
+  }
+  currentRunId = null;
+  activateScreen('scope-screen');
+  steps[2].classList.remove('current');
+  steps[1].classList.remove('done');
+  steps[1].classList.add('current');
+  await loadPeople();
+}
+
 document.getElementById('preview-back-button').addEventListener('click', async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
   button.textContent = 'Discarding…';
   try {
-    if (currentRunId !== null) {
-      await api(`/api/runs/${currentRunId}/discard`, { method: 'POST', body: '{}' });
-    }
-    currentRunId = null;
-    activateScreen('scope-screen');
-    steps[2].classList.remove('current');
-    steps[1].classList.remove('done');
-    steps[1].classList.add('current');
-    await loadPeople();
+    await discardCurrentPreview();
   } catch (error) {
     window.alert(error.message);
   } finally {
@@ -527,9 +539,13 @@ document.getElementById('review-conflicts-button').addEventListener('click', asy
   const button = event.currentTarget;
   button.disabled = true;
   const originalText = button.textContent;
-  button.textContent = 'Opening conflicts…';
+  const action = button.dataset.action;
+  const busyText = action === 'close' ? 'Closing…' : 'Opening…';
+  button.textContent = busyText;
   try {
-    if (currentConflicts.length || Number(document.getElementById('stat-conflicts').textContent.replaceAll(',', '')) > 0) {
+    if (action === 'close') {
+      await discardCurrentPreview();
+    } else if (action === 'conflicts') {
       await openConflictScreen();
     } else {
       await openApplyReview();
@@ -538,7 +554,7 @@ document.getElementById('review-conflicts-button').addEventListener('click', asy
     button.textContent = error.message;
   } finally {
     button.disabled = false;
-    if (button.textContent === 'Opening conflicts…') button.textContent = originalText;
+    if (button.textContent === busyText) button.textContent = originalText;
   }
 });
 
@@ -569,6 +585,10 @@ function updateApplyButton() {
 
 async function openApplyReview() {
   const review = await api(`/api/runs/${currentRunId}/apply`);
+  if (review.total === 0) {
+    await discardCurrentPreview();
+    return;
+  }
   currentApplyReview = review;
   document.querySelectorAll('.screen').forEach((screen) => screen.classList.remove('active'));
   document.getElementById('apply-screen').classList.add('active');
