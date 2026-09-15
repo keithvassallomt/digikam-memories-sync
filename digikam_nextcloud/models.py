@@ -171,10 +171,28 @@ class SyncReport:
     # to storage. The detail cap counts these, not the list in memory, so
     # draining a batch to disk does not quietly raise the cap.
     actions_total: int = 0
+    # Which faces have already been reported as a disagreement. Held separately
+    # from ``conflicts`` because that list is emptied whenever a batch is
+    # written out, and both passes must still see what the other found.
+    conflict_keys: set[tuple[Any, Any]] = field(default_factory=set)
 
     @property
     def conflict_count(self) -> int:
         return self.prior_conflicts + len(self.conflicts)
+
+    def first_sight_of(self, conflict: "RegionConflict") -> bool:
+        """True the first time this face is reported as a disagreement.
+
+        The forward and reverse passes both look at every matched pair, so
+        without this the same face is counted twice.
+        """
+        key = (conflict.nc_file_id, conflict.nc_detection_id)
+        if key == (None, None):
+            key = (conflict.path, conflict.digikam_rect)
+        if key in self.conflict_keys:
+            return False
+        self.conflict_keys.add(key)
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         return {

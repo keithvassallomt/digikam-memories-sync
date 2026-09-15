@@ -92,10 +92,6 @@ def compare_memories_to_digikam(
     if start_index:
         # The path order is deterministic, so a position is enough to resume.
         paths = paths[int(start_index):]
-    existing_conflicts = {
-        (conflict.nc_file_id, conflict.nc_detection_id)
-        for conflict in report.conflicts
-    }
     done = 0
     reverse_matched = 0
 
@@ -121,7 +117,6 @@ def compare_memories_to_digikam(
             )
             for digikam_face, memories_face, iou in pairs:
                 file_id = int(memories_face.nc_file_id or remote[0].file.file_id)
-                conflict_key = (file_id, memories_face.nc_detection_id)
                 if person_names_match(digikam_face.person, memories_face.person):
                     face_ledger.record([
                         {
@@ -135,8 +130,6 @@ def compare_memories_to_digikam(
                         }
                     ])
                     continue
-                if conflict_key in existing_conflicts:
-                    continue
                 verdict = ledger_module.attribute(
                     digikam_face.person,
                     memories_face.person,
@@ -149,22 +142,22 @@ def compare_memories_to_digikam(
                     # The forward pass owns this pair and has already proposed
                     # the change. Recording it twice would double-count it.
                     continue
-                existing_conflicts.add(conflict_key)
+                conflict = RegionConflict(
+                    path=relative,
+                    digikam_person=digikam_face.person,
+                    digikam_rect=digikam_face.rect.as_tuple(),
+                    nextcloud_person=memories_face.person,
+                    nextcloud_rect=memories_face.rect.as_tuple(),
+                    iou=iou,
+                    nc_detection_id=memories_face.nc_detection_id,
+                    nc_file_id=file_id,
+                    digikam_image_id=image.image_id,
+                    digikam_tag_id=digikam_face.digikam_tag_id,
+                )
+                if not report.first_sight_of(conflict):
+                    continue
                 if len(report.conflicts) < max_conflicts:
-                    report.conflicts.append(
-                        RegionConflict(
-                            path=relative,
-                            digikam_person=digikam_face.person,
-                            digikam_rect=digikam_face.rect.as_tuple(),
-                            nextcloud_person=memories_face.person,
-                            nextcloud_rect=memories_face.rect.as_tuple(),
-                            iou=iou,
-                            nc_detection_id=memories_face.nc_detection_id,
-                            nc_file_id=file_id,
-                            digikam_image_id=image.image_id,
-                            digikam_tag_id=digikam_face.digikam_tag_id,
-                        )
-                    )
+                    report.conflicts.append(conflict)
 
             for memories_face in only_memories:
                 represented = overlapping_same_person(

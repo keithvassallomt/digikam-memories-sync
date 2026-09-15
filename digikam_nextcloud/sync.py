@@ -60,6 +60,8 @@ def _record_conflict(
     *,
     max_conflicts: int,
 ) -> None:
+    if not report.first_sight_of(conflict):
+        return
     if len(report.conflicts) < max_conflicts:
         report.conflicts.append(conflict)
 

@@ -72,6 +72,50 @@ class CheckpointTest(unittest.TestCase):
         self.assertEqual(self.state.attention_counts()["conflicts"], 0,
                          "still previewing, so not yet in the inbox")
 
+    def conflict(self, detection_id=2):
+        return RegionConflict(
+            path="a.jpg", digikam_person="Martina Muscat", digikam_rect=(0, 0, 1, 1),
+            nextcloud_person="Eli Vassallo", nextcloud_rect=(0, 0, 1, 1),
+            iou=0.62, nc_detection_id=detection_id, nc_file_id=1,
+        )
+
+    def test_a_face_reported_by_both_passes_is_counted_once(self):
+        """Both passes look at every matched pair, and the list between them
+        gets emptied. The count has to survive that."""
+        from digikam_nextcloud.sync import _record_conflict
+
+        report = SyncReport()
+        _record_conflict(report, self.conflict(), max_conflicts=100)
+        self.assertEqual(report.conflict_count, 1)
+
+        StateCheckpoint(self.state, self.run_id).batch_done("scanning_digikam", {}, report)
+        self.assertEqual(report.conflicts, [], "written out and cleared")
+        self.assertEqual(report.conflict_count, 1)
+
+        # The reverse pass now reaches the same face.
+        _record_conflict(report, self.conflict(), max_conflicts=100)
+        self.assertEqual(
+            report.conflict_count, 1,
+            "the same disagreement must not be counted twice")
+
+    def test_different_faces_are_still_counted_separately(self):
+        from digikam_nextcloud.sync import _record_conflict
+
+        report = SyncReport()
+        _record_conflict(report, self.conflict(detection_id=2), max_conflicts=100)
+        _record_conflict(report, self.conflict(detection_id=3), max_conflicts=100)
+        self.assertEqual(report.conflict_count, 2)
+
+    def test_a_face_with_no_detection_falls_back_to_its_rectangle(self):
+        report = SyncReport()
+        first = RegionConflict(
+            path="a.jpg", digikam_person="A", digikam_rect=(0, 0, 1, 1),
+            nextcloud_person="B", nextcloud_rect=(0, 0, 1, 1),
+            iou=0.5, nc_detection_id=None, nc_file_id=None,
+        )
+        self.assertTrue(report.first_sight_of(first))
+        self.assertFalse(report.first_sight_of(first))
+
     def test_counters_restore_onto_a_fresh_report(self):
         first = SyncReport()
         first.assigned = 7
