@@ -1545,13 +1545,19 @@ class StateStore:
     def recent_runs(self, limit: int = 25, before_id: int | None = None) -> dict[str, Any]:
         """A page of run history, newest first, for the activity list."""
         limit = max(1, min(200, int(limit)))
-        clause = "WHERE id < ?" if before_id is not None else ""
+        clause = "WHERE r.id < ?" if before_id is not None else ""
         values: tuple[Any, ...] = (int(before_id), limit + 1) if before_id is not None else (limit + 1,)
         with self.lock:
             rows = self.conn.execute(
-                f"""SELECT id, mode, status, trigger, auto_apply, waiting_reason,
-                           started_at, finished_at, summary_json
-                    FROM runs {clause} ORDER BY id DESC LIMIT ?""",
+                f"""SELECT r.id, r.mode, r.status, r.trigger, r.auto_apply,
+                           r.waiting_reason, r.started_at, r.finished_at, r.summary_json,
+                           COALESCE(SUM(CASE WHEN c.status = 'open' THEN 1 ELSE 0 END), 0)
+                               AS conflicts_open,
+                           COALESCE(SUM(CASE WHEN c.status = 'resolved' THEN 1 ELSE 0 END), 0)
+                               AS conflicts_resolved
+                    FROM runs r LEFT JOIN conflicts c ON c.run_id = r.id
+                    {clause}
+                    GROUP BY r.id ORDER BY r.id DESC LIMIT ?""",
                 values,
             ).fetchall()
         runs = []
@@ -1559,6 +1565,8 @@ class StateStore:
             item = dict(row)
             item["summary"] = json.loads(item.pop("summary_json") or "{}")
             item["auto_apply"] = bool(item["auto_apply"])
+            item["conflicts_open"] = int(item.get("conflicts_open") or 0)
+            item["conflicts_resolved"] = int(item.get("conflicts_resolved") or 0)
             runs.append(item)
         return {
             "runs": runs,
@@ -1746,6 +1754,19 @@ class StateStore:
         }
         raw_result = result.pop("result_json")
         result["result"] = json.loads(raw_result) if raw_result else None
+        # How many decisions are still open, as opposed to how many this run
+        # found. A screen that shows the second as if it were the first tells
+        # you to do work you have already done.
+        with self.lock:
+            decisions = self.conn.execute(
+                "SELECT"
+                " COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0) AS still_open,"
+                " COALESCE(SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END), 0) AS settled"
+                " FROM conflicts WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        result["conflicts_open"] = int(decisions["still_open"])
+        result["conflicts_resolved"] = int(decisions["settled"])
         counts = self.apply_counts(run_id)
         result["apply"] = {
             **counts,

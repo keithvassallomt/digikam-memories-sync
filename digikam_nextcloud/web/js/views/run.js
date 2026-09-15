@@ -26,9 +26,11 @@ export function create({ go, refresh }) {
 
   element.append(body);
 
-  function timeline(run) {
+  function timeline(run, review) {
     const summary = run.summary || {};
     const applyState = run.apply || {};
+    const open = run.conflicts_open || 0;
+    const settled = run.conflicts_resolved || 0;
     const items = [];
     const finished = ['previewed', 'applying', 'applied', 'applied_with_issues', 'apply_failed', 'no_changes'];
     if (finished.includes(run.status)) {
@@ -37,14 +39,17 @@ export function create({ go, refresh }) {
     } else {
       items.push(['◐', 'wait', copy.phase((run.progress || {}).phase), 'now']);
     }
+    if (settled) {
+      items.push(['●', 'good', `You decided ${plural(settled, 'name', 'names')}`, 'done']);
+    }
+    if (open) {
+      items.push(['◐', 'wait', `${plural(open, 'face needs', 'faces need')} a decision`, 'waiting for you']);
+    }
     if (applyState.applied) {
       items.push(['●', 'good', `Applied ${plural(applyState.applied, 'change', 'changes')}`, timeOfDay(run.finished_at)]);
     }
-    if (run.status === 'previewed' && copy.changeCount(summary)) {
-      items.push(['○', 'idle', `${plural(copy.changeCount(summary), 'change is', 'changes are')} ready to apply`, 'waiting for you']);
-    }
-    if (summary.conflicts) {
-      items.push(['◐', 'wait', `${plural(summary.conflicts, 'face needs', 'faces need')} a decision`, 'waiting for you']);
+    if (run.status === 'previewed' && review && review.total) {
+      items.push(['○', 'idle', `${plural(review.total, 'change is', 'changes are')} ready to apply`, 'waiting for you']);
     }
     if (applyState.failed) {
       items.push(['◐', 'wait', `${plural(applyState.failed, 'change', 'changes')} could not be applied`, 'waiting for you']);
@@ -56,13 +61,20 @@ export function create({ go, refresh }) {
         h('span', { class: 'muted' }, right)))));
   }
 
-  function stats(run) {
+  function stats(run, review) {
+    // One set of numbers for the whole screen. When a plan exists it is the
+    // authority, because it includes the decisions you have made.
     const summary = run.summary || {};
+    const memories = review
+      ? review.memories
+      : (summary.assigned || 0) + (summary.inserted || 0);
+    const digikam = review ? review.digikam : copy.digikamChangeCount(summary);
+    const open = run.conflicts_open ?? summary.conflicts ?? 0;
     return h('div', { class: 'stats' },
       stat(count(summary.skipped || 0), 'Already correct'),
-      stat(count((summary.assigned || 0) + (summary.inserted || 0)), 'Changes for Memories'),
-      stat(count(copy.digikamChangeCount(summary)), 'Changes for digiKam'),
-      stat(count(summary.conflicts || 0), 'Need your decision'));
+      stat(count(memories), 'Changes for Memories'),
+      stat(count(digikam), 'Changes for digiKam'),
+      stat(count(open), open ? 'Need your decision' : 'Still to decide'));
   }
 
   function results(run) {
@@ -133,12 +145,7 @@ export function create({ go, refresh }) {
           h('div', {},
             h('h3', {}, 'A digiKam backup is made automatically'),
             h('div', { class: 'muted' },
-              'Face Sync copies the database before the first local change.'))),
-        h('div', { class: 'stats apply-stats' },
-          stat(count(review.total), 'Total face changes'),
-          stat(count(review.memories), 'Changes in Memories'),
-          stat(count(review.digikam), 'Changes in digiKam'),
-          stat(count(review.conflicts), 'Decisions included'))),
+              'Face Sync copies the database before the first local change.')))),
       needsClose
         ? card(
             h('h3', {}, 'Close digiKam before continuing'),
@@ -257,8 +264,8 @@ export function create({ go, refresh }) {
         (run.progress || {}).error
           ? h('p', { class: 'message error' }, run.progress.error)
           : null,
-        timeline(run),
-        stats(run),
+        timeline(run, review),
+        stats(run, review),
         results(run),
         applyProgress(run),
         applyCard(run, review),

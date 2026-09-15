@@ -291,6 +291,54 @@ class ServiceLayerTest(unittest.TestCase):
         self.assertEqual(len(rest["runs"]), 1)
         self.assertFalse(rest["has_more"])
 
+    def test_a_run_reports_open_decisions_apart_from_the_ones_it_found(self) -> None:
+        """Answering a conflict must change what the screen asks of you."""
+        run_id = self.state.create_run("all")
+        self.state.finish_run(run_id, "previewed", {"conflicts": 3})
+        self.state.save_conflicts(run_id, [
+            {
+                "path": f"{index}.jpg",
+                "digikam_person": "Martina Muscat", "nextcloud_person": "Eli Vassallo",
+                "digikam_rect": [0, 0, 1, 1], "nextcloud_rect": [0, 0, 1, 1],
+                "iou": 0.6, "nc_file_id": 1, "nc_detection_id": index,
+            }
+            for index in range(3)
+        ])
+
+        run = self.state.run(run_id)
+        self.assertEqual(run["conflicts_open"], 3)
+        self.assertEqual(run["conflicts_resolved"], 0)
+
+        for conflict in self.state.open_conflicts()[:3]:
+            self.state.resolve_conflict(run_id, conflict["id"], "digikam")
+
+        run = self.state.run(run_id)
+        self.assertEqual(run["conflicts_open"], 0, "nothing is still being asked")
+        self.assertEqual(run["conflicts_resolved"], 3)
+        self.assertEqual(
+            run["summary"]["conflicts"], 3,
+            "what the run found does not change; only what is open does")
+
+    def test_the_activity_list_carries_the_same_two_numbers(self) -> None:
+        run_id = self.state.create_run("all")
+        self.state.finish_run(run_id, "previewed", {"conflicts": 1})
+        self.state.save_conflicts(run_id, [{
+            "path": "a.jpg", "digikam_person": "A", "nextcloud_person": "B",
+            "digikam_rect": [0, 0, 1, 1], "nextcloud_rect": [0, 0, 1, 1],
+            "iou": 0.6, "nc_file_id": 1, "nc_detection_id": 2,
+        }])
+        row = self.service.activity()["runs"][0]
+        self.assertEqual(row["conflicts_open"], 1)
+        self.state.resolve_conflict(run_id, self.state.open_conflicts()[0]["id"], "digikam")
+        self.assertEqual(self.service.activity()["runs"][0]["conflicts_open"], 0)
+
+    def test_a_run_with_no_conflicts_reports_zero_not_nothing(self) -> None:
+        run_id = self.state.create_run("all")
+        self.state.finish_run(run_id, "previewed", {})
+        run = self.state.run(run_id)
+        self.assertEqual(run["conflicts_open"], 0)
+        self.assertEqual(run["conflicts_resolved"], 0)
+
     def test_runs_record_what_started_them(self) -> None:
         run_id = self.state.create_run("all", trigger="digikam_closed", auto_apply=True)
         found = self.service.activity()["runs"][0]

@@ -72,8 +72,11 @@ export function outcome(run) {
     case 'applying':
       return 'Applying changes';
     case 'previewed': {
-      const changes = changeCount(summary);
-      if (summary.conflicts) return `${plural(summary.conflicts, 'face needs', 'faces need')} a decision`;
+      // What is still open, not what the run found. Those differ the moment
+      // you answer the first one.
+      const open = run.conflicts_open ?? summary.conflicts ?? 0;
+      if (open) return `${plural(open, 'face needs', 'faces need')} a decision`;
+      const changes = changeCount(summary) + (run.conflicts_resolved || 0);
       return changes ? `${plural(changes, 'change', 'changes')} ready to apply` : 'No changes';
     }
     case 'applied':
