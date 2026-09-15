@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Face Sync · phase 2 prototype</title>
+</head>
+<body>
+<div id="face-sync-prototypes">
+  <style>
+    body { background: light-dark(#e4eaec, #0b0f11); margin: 0; padding: 22px; }
+    #face-sync-prototypes {
+      color-scheme: light dark;
+      --fs-page: light-dark(#eef2f4, #11171a);
+      --fs-panel: light-dark(#ffffff, #1b2428);
+      --fs-panel-alt: light-dark(#f5f8f9, #222d32);
+      --fs-ink: light-dark(#172126, #edf4f6);
+      --fs-muted: light-dark(#5c6b72, #a9b8be);
+      --fs-line: light-dark(#d7e0e4, #354349);
+      --fs-brand: light-dark(#236b59, #6bc6ad);
+      --fs-brand-ink: light-dark(#ffffff, #0b211b);
+      --fs-good: light-dark(#26734d, #73d3a2);
+      --fs-warn: light-dark(#99600b, #f0bd61);
+      --fs-danger: light-dark(#a43a3a, #ff9696);
+      color: var(--fs-ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0 auto;
+      max-width: 1180px;
+      width: 100%;
+    }
+    #face-sync-prototypes[data-theme="light"] { color-scheme: light; }
+    #face-sync-prototypes[data-theme="dark"] { color-scheme: dark; }
+    #face-sync-prototypes * { box-sizing: border-box; }
+    #face-sync-prototypes button,
+    #face-sync-prototypes input,
+    #face-sync-prototypes select { font: inherit; }
+    #face-sync-prototypes button { cursor: pointer; }
+
+    /* ---------------------------------------------------------- switcher */
+    #face-sync-prototypes .fs-choicebar {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    #face-sync-prototypes .fs-choicebar strong { font-weight: 500; }
+    #face-sync-prototypes .fs-segment {
+      background: var(--fs-panel-alt);
+      border: 1px solid var(--fs-line);
+      border-radius: 10px;
+      display: inline-flex;
+      flex-wrap: wrap;
+      padding: 3px;
+    }
+    #face-sync-prototypes .fs-segment button {
+      background: transparent;
+      border: 0;
+      border-radius: 7px;
+      color: var(--fs-muted);
+      min-height: 34px;
+      padding: 6px 11px;
+      font-size: 13px;
+    }
+    #face-sync-prototypes .fs-segment button[aria-pressed="true"] {
+      background: var(--fs-panel);
+      color: var(--fs-ink);
+      box-shadow: 0 1px 4px light-dark(#00000018, #00000050);
+    }
+    #face-sync-prototypes .fs-switchrow {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    #face-sync-prototypes .fs-toggle-note {
+      align-items: center;
+      color: var(--fs-muted);
+      display: flex;
+      font-size: 13px;
+      gap: 7px;
+    }
+
+    /* ------------------------------------------------------------ window */
+    #face-sync-prototypes .fs-window {
+      background: var(--fs-page);
+      border: 1px solid var(--fs-line);
+      border-radius: 16px;
+      min-height: 680px;
+      overflow: hidden;
+      position: relative;
+    }
+    #face-sync-prototypes .fs-topbar {
+      align-items: center;
+      background: var(--fs-panel);
+      border-bottom: 1px solid var(--fs-line);
+      display: flex;
+      justify-content: space-between;
+      min-height: 62px;
+      padding: 11px 20px;
+    }
+    #face-sync-prototypes .fs-brand { align-items: center; display: flex; gap: 10px; }
+    #face-sync-prototypes .fs-logo {
+      align-items: center;
+      background: var(--fs-brand);
+      border-radius: 9px;
+      color: var(--fs-brand-ink);
+      display: inline-flex;
+      font-size: 22px;
+      height: 36px;
+      justify-content: center;
+      width: 36px;
+    }
+    #face-sync-prototypes .fs-title { font-weight: 500; }
+    #face-sync-prototypes .fs-subtitle,
+    #face-sync-prototypes .fs-help,
+    #face-sync-prototypes .fs-meta { color: var(--fs-muted); }
+    #face-sync-prototypes .fs-subtitle,
+    #face-sync-prototypes .fs-meta { font-size: 13px; }
+    #face-sync-prototypes .fs-status { align-items: center; display: flex; gap: 8px; }
+    #face-sync-prototypes .fs-dot {
+      background: var(--fs-good);
+      border-radius: 50%;
+      flex: 0 0 auto;
+      height: 9px;
+      width: 9px;
+    }
+    #face-sync-prototypes .fs-dot.is-wait { background: var(--fs-warn); }
+    #face-sync-prototypes .fs-dot.is-bad { background: var(--fs-danger); }
+    #face-sync-prototypes .fs-dot.is-off { background: var(--fs-muted); }
+
+    /* -------------------------------------------------------------- rail */
+    #face-sync-prototypes .fs-shell {
+      display: grid;
+      grid-template-columns: 208px minmax(0, 1fr);
+      min-height: 618px;
+    }
+    #face-sync-prototypes .fs-rail {
+      background: var(--fs-panel);
+      border-right: 1px solid var(--fs-line);
+      display: flex;
+      flex-direction: column;
+      padding: 18px 12px;
+    }
+    #face-sync-prototypes .fs-rail-item {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-radius: 9px;
+      color: var(--fs-muted);
+      display: flex;
+      gap: 10px;
+      margin-bottom: 3px;
+      min-height: 42px;
+      padding: 8px 11px;
+      text-align: left;
+      width: 100%;
+    }
+    #face-sync-prototypes .fs-rail-item[aria-current="page"] {
+      background: color-mix(in srgb, var(--fs-brand) 14%, transparent);
+      color: var(--fs-ink);
+      font-weight: 500;
+    }
+    #face-sync-prototypes .fs-rail-icon { flex: 0 0 auto; width: 18px; text-align: center; }
+    #face-sync-prototypes .fs-rail-label { flex: 1; }
+    #face-sync-prototypes .fs-badge {
+      background: var(--fs-danger);
+      border-radius: 999px;
+      color: light-dark(#ffffff, #2a0f0f);
+      font-size: 12px;
+      font-weight: 600;
+      min-width: 22px;
+      padding: 2px 7px;
+      text-align: center;
+    }
+    #face-sync-prototypes .fs-rail-footer {
+      border-top: 1px solid var(--fs-line);
+      color: var(--fs-muted);
+      font-size: 12px;
+      margin-top: auto;
+      padding: 14px 11px 2px;
+    }
+    #face-sync-prototypes .fs-rail-footer .fs-row-tight { align-items: center; display: flex; gap: 7px; }
+
+    /* ------------------------------------------------------------ screens */
+    #face-sync-prototypes .fs-main { padding: 28px clamp(18px, 3.6vw, 44px); }
+    #face-sync-prototypes .fs-screen { display: none; margin: 0 auto; max-width: 820px; }
+    #face-sync-prototypes .fs-screen.is-active { display: block; }
+    #face-sync-prototypes h2, #face-sync-prototypes h3, #face-sync-prototypes p { margin-top: 0; }
+    #face-sync-prototypes h2 { font-size: 25px; font-weight: 500; margin-bottom: 7px; }
+    #face-sync-prototypes h3 { font-size: 16px; font-weight: 500; margin-bottom: 4px; }
+    #face-sync-prototypes .fs-lead { color: var(--fs-muted); margin-bottom: 24px; }
+    #face-sync-prototypes .fs-card {
+      background: var(--fs-panel);
+      border: 1px solid var(--fs-line);
+      border-radius: 12px;
+      margin-bottom: 14px;
+      padding: 18px;
+    }
+    #face-sync-prototypes .fs-card-tight { padding: 14px 18px; }
+    #face-sync-prototypes .fs-row {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+    }
+    #face-sync-prototypes .fs-row-start { align-items: flex-start; display: flex; gap: 12px; }
+    #face-sync-prototypes .fs-iconbox {
+      align-items: center;
+      background: var(--fs-panel-alt);
+      border-radius: 9px;
+      display: inline-flex;
+      flex: 0 0 auto;
+      height: 38px;
+      justify-content: center;
+      width: 38px;
+    }
+    #face-sync-prototypes .fs-section-label {
+      color: var(--fs-muted);
+      font-size: 12px;
+      letter-spacing: .04em;
+      margin: 22px 0 8px;
+      text-transform: uppercase;
+    }
+
+    /* ----------------------------------------------------------- headline */
+    #face-sync-prototypes .fs-headline { font-size: 27px; font-weight: 500; margin: 0 0 6px; }
+    #face-sync-prototypes .fs-subline { color: var(--fs-muted); margin: 0 0 4px; }
+    #face-sync-prototypes .fs-subline-detail { color: var(--fs-muted); font-size: 13px; margin: 0; }
+    #face-sync-prototypes .fs-state-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 22px; }
+
+    /* ------------------------------------------------------------ buttons */
+    #face-sync-prototypes .fs-button {
+      align-items: center;
+      background: var(--fs-panel);
+      border: 1px solid var(--fs-line);
+      border-radius: 9px;
+      color: var(--fs-ink);
+      display: inline-flex;
+      gap: 8px;
+      justify-content: center;
+      min-height: 42px;
+      padding: 9px 15px;
+    }
+    #face-sync-prototypes .fs-button-primary {
+      background: var(--fs-brand);
+      border-color: var(--fs-brand);
+      color: var(--fs-brand-ink);
+    }
+    #face-sync-prototypes .fs-button-quiet { background: transparent; }
+    #face-sync-prototypes .fs-button-small { min-height: 34px; padding: 6px 11px; font-size: 13px; }
+    #face-sync-prototypes .fs-actions {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 22px;
+    }
+
+    /* -------------------------------------------------------------- menus */
+    #face-sync-prototypes .fs-menu-wrap { position: relative; }
+    #face-sync-prototypes .fs-menu {
+      background: var(--fs-panel);
+      border: 1px solid var(--fs-line);
+      border-radius: 11px;
+      box-shadow: 0 8px 24px light-dark(#0b21261f, #00000066);
+      display: none;
+      left: 0;
+      min-width: 244px;
+      padding: 6px;
+      position: absolute;
+      top: calc(100% + 6px);
+      z-index: 20;
+    }
+    #face-sync-prototypes .fs-menu.is-open { display: block; }
+    #face-sync-prototypes .fs-menu button {
+      background: transparent;
+      border: 0;
+      border-radius: 8px;
+      color: var(--fs-ink);
+      display: block;
+      min-height: 38px;
+      padding: 9px 11px;
+      text-align: left;
+      width: 100%;
+    }
+    #face-sync-prototypes .fs-menu button:hover { background: var(--fs-panel-alt); }
+    #face-sync-prototypes .fs-menu hr { border: 0; border-top: 1px solid var(--fs-line); margin: 5px 8px; }
+
+    /* ---------------------------------------------------------- libraries */
+    #face-sync-prototypes .fs-lib-row {
+      align-items: center;
+      border-top: 1px solid var(--fs-line);
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 24px minmax(90px, auto) 1fr auto;
+      padding: 12px 0;
+    }
+    #face-sync-prototypes .fs-lib-row:first-of-type { border-top: 0; padding-top: 4px; }
+    #face-sync-prototypes .fs-lib-detail { color: var(--fs-muted); font-size: 13px; overflow-wrap: anywhere; }
+    #face-sync-prototypes .fs-pill {
+      align-items: center;
+      border-radius: 999px;
+      display: inline-flex;
+      font-size: 12px;
+      gap: 6px;
+      padding: 4px 10px;
+      white-space: nowrap;
+    }
+    #face-sync-prototypes .fs-pill.is-good { background: color-mix(in srgb, var(--fs-good) 14%, var(--fs-panel)); color: var(--fs-good); }
+    #face-sync-prototypes .fs-pill.is-wait { background: color-mix(in srgb, var(--fs-warn) 16%, var(--fs-panel)); color: var(--fs-warn); }
+    #face-sync-prototypes .fs-pill.is-bad { background: color-mix(in srgb, var(--fs-danger) 14%, var(--fs-panel)); color: var(--fs-danger); }
+    #face-sync-prototypes .fs-pill.is-off { background: var(--fs-panel-alt); color: var(--fs-muted); }
+
+    /* --------------------------------------------------------- attention */
+    #face-sync-prototypes .fs-attention {
+      background: color-mix(in srgb, var(--fs-warn) 10%, var(--fs-panel));
+      border: 1px solid color-mix(in srgb, var(--fs-warn) 40%, var(--fs-line));
+      border-radius: 12px;
+      margin-bottom: 14px;
+      padding: 16px 18px;
+    }
+    #face-sync-prototypes .fs-attention h3 { margin-bottom: 2px; }
+    #face-sync-prototypes .fs-attention-row {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      padding: 7px 0;
+    }
+    #face-sync-prototypes .fs-attention-row + .fs-attention-row { border-top: 1px solid color-mix(in srgb, var(--fs-warn) 24%, transparent); }
+
+    /* ---------------------------------------------------------- activity */
+    #face-sync-prototypes .fs-activity-row {
+      align-items: center;
+      border-top: 1px solid var(--fs-line);
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 78px minmax(0, 1fr) auto;
+      padding: 12px 0;
+    }
+    #face-sync-prototypes .fs-activity-row:first-of-type { border-top: 0; }
+    #face-sync-prototypes .fs-activity-time { color: var(--fs-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+    #face-sync-prototypes .fs-tag {
+      background: var(--fs-panel-alt);
+      border-radius: 6px;
+      color: var(--fs-muted);
+      font-size: 12px;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+    #face-sync-prototypes button.fs-activity-row { background: transparent; border-left: 0; border-right: 0; border-bottom: 0; color: inherit; text-align: left; width: 100%; }
+    #face-sync-prototypes button.fs-activity-row:hover { background: var(--fs-panel-alt); }
+
+    /* --------------------------------------------------------- timeline */
+    #face-sync-prototypes .fs-timeline { list-style: none; margin: 0; padding: 0; }
+    #face-sync-prototypes .fs-timeline li {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      padding: 9px 0;
+    }
+    #face-sync-prototypes .fs-timeline .fs-mark { color: var(--fs-good); }
+    #face-sync-prototypes .fs-timeline .fs-mark.is-wait { color: var(--fs-warn); }
+    #face-sync-prototypes .fs-timeline .fs-mark.is-idle { color: var(--fs-muted); }
+
+    /* ------------------------------------------------------------- stats */
+    #face-sync-prototypes .fs-stats {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(4, 1fr);
+      margin: 16px 0;
+    }
+    #face-sync-prototypes .fs-stat {
+      background: var(--fs-panel);
+      border: 1px solid var(--fs-line);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    #face-sync-prototypes .fs-stat-number { font-size: 24px; font-weight: 500; }
+    #face-sync-prototypes .fs-stat-label { color: var(--fs-muted); font-size: 12px; margin-top: 3px; }
+    #face-sync-prototypes .fs-review-list { margin: 10px 0 0; padding: 0; }
+    #face-sync-prototypes .fs-review-list li {
+      align-items: center;
+      border-top: 1px solid var(--fs-line);
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      list-style: none;
+      padding: 11px 0;
+    }
+    #face-sync-prototypes .fs-count { font-variant-numeric: tabular-nums; font-weight: 500; }
+
+    /* ---------------------------------------------------------- progress */
+    #face-sync-prototypes .fs-progress {
+      background: var(--fs-line);
+      border-radius: 999px;
+      height: 9px;
+      overflow: hidden;
+      width: 100%;
+    }
+    #face-sync-prototypes .fs-progress > span { background: var(--fs-brand); display: block; height: 100%; }
+    #face-sync-prototypes .fs-progress-head {
+      align-items: baseline;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    #face-sync-prototypes .fs-progress-head strong { font-size: 19px; font-weight: 500; }
+    #face-sync-prototypes .fs-live { color: var(--fs-muted); display: flex; flex-wrap: wrap; gap: 18px; margin-top: 13px; font-size: 13px; }
+    #face-sync-prototypes .fs-live strong { color: var(--fs-ink); font-weight: 500; }
+
+    /* ---------------------------------------------------------- conflict */
+    #face-sync-prototypes .fs-conflict-grid {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr);
+    }
+    #face-sync-prototypes .fs-photo {
+      aspect-ratio: 4 / 3;
+      background:
+        radial-gradient(circle at 54% 40%, light-dark(#d6b99e, #775f50) 0 8%, transparent 8.5%),
+        radial-gradient(ellipse at 54% 62%, light-dark(#596b72, #32444c) 0 19%, transparent 19.5%),
+        linear-gradient(145deg, light-dark(#b7d3d8, #27404a), light-dark(#e2d2b9, #705f4a));
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+    #face-sync-prototypes .fs-facebox {
+      border: 3px solid var(--fs-warn);
+      height: 34%;
+      left: 41%;
+      position: absolute;
+      top: 23%;
+      width: 27%;
+    }
+    #face-sync-prototypes .fs-facebox span {
+      background: var(--fs-warn);
+      color: light-dark(#2c210c, #281d09);
+      font-size: 11px;
+      left: -3px;
+      padding: 4px 6px;
+      position: absolute;
+      top: 100%;
+      white-space: nowrap;
+    }
+    #face-sync-prototypes .fs-handle {
+      background: #ffffff;
+      border: 2px solid var(--fs-brand);
+      border-radius: 50%;
+      height: 13px;
+      position: absolute;
+      width: 13px;
+    }
+    #face-sync-prototypes .fs-photo-caption { color: var(--fs-muted); font-size: 12px; margin-top: 7px; overflow-wrap: anywhere; }
+    #face-sync-prototypes .fs-name-choice {
+      align-items: flex-start;
+      background: var(--fs-panel);
+      border: 1px solid var(--fs-line);
+      border-radius: 10px;
+      color: var(--fs-ink);
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+      min-height: 72px;
+      padding: 13px;
+      text-align: left;
+      width: 100%;
+    }
+    #face-sync-prototypes .fs-name-choice[aria-pressed="true"] {
+      border-color: var(--fs-brand);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--fs-brand) 16%, transparent);
+    }
+    #face-sync-prototypes .fs-name-choice strong { display: block; font-weight: 500; }
+    #face-sync-prototypes .fs-check { align-items: flex-start; display: flex; gap: 9px; margin-top: 14px; }
+    #face-sync-prototypes .fs-check input { margin-top: 4px; }
+
+    /* -------------------------------------------------------------- logs */
+    #face-sync-prototypes .fs-logbar {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    #face-sync-prototypes .fs-logbar .fs-field { align-items: center; display: flex; gap: 7px; }
+    #face-sync-prototypes .fs-input, #face-sync-prototypes .fs-select {
+      background: var(--fs-panel-alt);
+      border: 1px solid var(--fs-line);
+      border-radius: 8px;
+      color: var(--fs-ink);
+      min-height: 38px;
+      padding: 7px 10px;
+    }
+    #face-sync-prototypes .fs-logview {
+      background: var(--fs-panel);
+      border: 1px solid var(--fs-line);
+      border-radius: 12px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 12.5px;
+      max-height: 340px;
+      overflow: auto;
+      padding: 12px 14px;
+    }
+    #face-sync-prototypes .fs-logline {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 66px 52px 62px minmax(0, 1fr);
+      padding: 4px 0;
+      white-space: pre-wrap;
+    }
+    #face-sync-prototypes .fs-logline .fs-lvl-info { color: var(--fs-good); }
+    #face-sync-prototypes .fs-logline .fs-lvl-debug { color: var(--fs-muted); }
+    #face-sync-prototypes .fs-logline .fs-lvl-warn { color: var(--fs-warn); }
+    #face-sync-prototypes .fs-logline .fs-lvl-error { color: var(--fs-danger); }
+    #face-sync-prototypes .fs-logline .fs-logtime,
+    #face-sync-prototypes .fs-logline .fs-logrun { color: var(--fs-muted); }
+
+    /* ---------------------------------------------------------- settings */
+    #face-sync-prototypes .fs-setting-row {
+      align-items: center;
+      border-top: 1px solid var(--fs-line);
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 13px 0;
+    }
+    #face-sync-prototypes .fs-setting-row:first-of-type { border-top: 0; }
+    #face-sync-prototypes .fs-setting-row .fs-meta { margin-top: 3px; }
+    #face-sync-prototypes .fs-inline-number { width: 72px; }
+    #face-sync-prototypes .fs-switch {
+      align-items: center;
+      background: var(--fs-panel-alt);
+      border: 1px solid var(--fs-line);
+      border-radius: 999px;
+      display: inline-flex;
+      gap: 8px;
+      padding: 4px;
+    }
+    #face-sync-prototypes .fs-switch button {
+      background: transparent;
+      border: 0;
+      border-radius: 999px;
+      color: var(--fs-muted);
+      font-size: 13px;
+      min-height: 30px;
+      padding: 4px 14px;
+    }
+    #face-sync-prototypes .fs-switch button[aria-pressed="true"] { background: var(--fs-brand); color: var(--fs-brand-ink); }
+
+    /* ------------------------------------------------------------- toast */
+    #face-sync-prototypes .fs-toast {
+      background: light-dark(#ffffff, #2b3439);
+      border: 1px solid var(--fs-line);
+      border-radius: 12px;
+      bottom: 18px;
+      box-shadow: 0 10px 30px light-dark(#0b212633, #00000077);
+      max-width: 360px;
+      padding: 14px 16px;
+      position: absolute;
+      right: 18px;
+      width: calc(100% - 36px);
+      z-index: 40;
+    }
+    #face-sync-prototypes .fs-toast[hidden] { display: none !important; }
+    #face-sync-prototypes .fs-toast-head {
+      align-items: center;
+      color: var(--fs-muted);
+      display: flex;
+      font-size: 12px;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    #face-sync-prototypes .fs-toast-head .fs-logo { border-radius: 6px; font-size: 14px; height: 20px; width: 20px; }
+    #face-sync-prototypes .fs-toast-origin { margin-left: auto; font-variant-numeric: tabular-nums; }
+    #face-sync-prototypes .fs-toast-body { cursor: pointer; }
+    #face-sync-prototypes .fs-toast-body strong { display: block; font-weight: 500; margin-bottom: 3px; }
+    #face-sync-prototypes .fs-toast-close {
+      background: transparent;
+      border: 0;
+      color: var(--fs-muted);
+      line-height: 1;
+      padding: 0 2px;
+    }
+    #face-sync-prototypes .fs-toast-tag {
+      background: var(--fs-panel-alt);
+      border-radius: 5px;
+      color: var(--fs-muted);
+      font-size: 10px;
+      letter-spacing: .05em;
+      margin-top: 10px;
+      padding: 3px 6px;
+      text-transform: uppercase;
+      display: inline-block;
+    }
+    #face-sync-prototypes .fs-note {
+      background: color-mix(in srgb, var(--fs-brand) 11%, var(--fs-panel));
+      border-radius: 9px;
+      color: var(--fs-muted);
+      margin-bottom: 16px;
+      padding: 12px 14px;
+    }
+    #face-sync-prototypes .fs-success { color: var(--fs-good); }
+    #face-sync-prototypes [hidden] { display: none !important; }
+
+    @media (max-width: 900px) {
+      #face-sync-prototypes .fs-shell { display: block; }
+      #face-sync-prototypes .fs-rail { border-bottom: 1px solid var(--fs-line); border-right: 0; flex-direction: row; overflow-x: auto; padding: 8px; }
+      #face-sync-prototypes .fs-rail-item { margin: 0; width: auto; white-space: nowrap; }
+      #face-sync-prototypes .fs-rail-footer { display: none; }
+      #face-sync-prototypes .fs-stats { grid-template-columns: 1fr 1fr; }
+      #face-sync-prototypes .fs-conflict-grid { grid-template-columns: 1fr; }
+      #face-sync-prototypes .fs-main { padding: 22px 15px; }
+    }
+  </style>
+
+  <div class="fs-choicebar">
+    <div class="fs-switchrow">
+      <strong>Home state</strong>
+      <div class="fs-segment" aria-label="Home state">
+        <button type="button" data-state="insync" aria-pressed="true">In sync</button>
+        <button type="button" data-state="syncing" aria-pressed="false">Syncing</button>
+        <button type="button" data-state="waiting-digikam" aria-pressed="false">Waiting · digiKam</button>
+        <button type="button" data-state="waiting-recognize" aria-pressed="false">Waiting · Recognize</button>
+        <button type="button" data-state="waiting-connection" aria-pressed="false">Waiting · connection</button>
+        <button type="button" data-state="paused" aria-pressed="false">Paused</button>
+        <button type="button" data-state="off" aria-pressed="false">Off</button>
+        <button type="button" data-state="ready" aria-pressed="false">Ready to apply</button>
+      </div>
+    </div>
+    <div class="fs-switchrow">
+      <label class="fs-toggle-note"><input type="checkbox" data-attention-toggle checked> 15 faces need a decision</label>
+      <div class="fs-segment" aria-label="Theme">
+        <button type="button" data-theme-choice="auto" aria-pressed="true">Auto</button>
+        <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+        <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+  </div>
+
+  <section class="fs-window" aria-label="Face Sync phase 2 prototype">
+    <header class="fs-topbar">
+      <div class="fs-brand">
+        <span class="fs-logo" aria-hidden="true">◎</span>
+        <div><div class="fs-title">Face Sync</div><div class="fs-subtitle">digiKam ↔ Memories</div></div>
+      </div>
+      <div class="fs-status">
+        <span class="fs-dot" data-top-dot></span>
+        <span class="fs-meta" data-top-status>Connected as keith</span>
+      </div>
+    </header>
+
+    <div class="fs-shell">
+      <nav class="fs-rail" aria-label="Sections">
+        <button class="fs-rail-item" type="button" data-nav="home" aria-current="page"><span class="fs-rail-icon" aria-hidden="true">⌂</span><span class="fs-rail-label">Home</span></button>
+        <button class="fs-rail-item" type="button" data-nav="activity"><span class="fs-rail-icon" aria-hidden="true">≡</span><span class="fs-rail-label">Activity</span></button>
+        <button class="fs-rail-item" type="button" data-nav="attention"><span class="fs-rail-icon" aria-hidden="true">!</span><span class="fs-rail-label">Needs attention</span><span class="fs-badge" data-rail-badge>15</span></button>
+        <button class="fs-rail-item" type="button" data-nav="logs"><span class="fs-rail-icon" aria-hidden="true">▤</span><span class="fs-rail-label">Logs</span></button>
+        <button class="fs-rail-item" type="button" data-nav="settings"><span class="fs-rail-icon" aria-hidden="true">⚙</span><span class="fs-rail-label">Settings</span></button>
+        <div class="fs-rail-footer">
+          <div class="fs-row-tight"><span class="fs-dot"></span><span>Running in the background</span></div>
+          <div style="margin-top:4px">Since 08:01 today</div>
+          <button class="fs-button fs-button-quiet fs-button-small" style="margin-top:8px;padding-left:0" type="button" data-nav="setup">First-run setup →</button>
+        </div>
+      </nav>
+
+      <main class="fs-main">
+
+        <!-- ============================================================ HOME -->
+        <section class="fs-screen is-active" data-screen="home">
+
+          <div data-home-state="insync">
+            <p class="fs-headline">Everything is in sync</p>
+            <p class="fs-subline">Last sync today 09:12 · 3 changes · Next check in 4 min</p>
+            <div class="fs-state-actions">
+              <div class="fs-menu-wrap">
+                <button class="fs-button fs-button-primary" type="button" data-menu="sync">Sync now ▾</button>
+                <div class="fs-menu" data-menu-panel="sync">
+                  <button type="button" data-sync-choice="all">Sync everything now</button>
+                  <button type="button" data-sync-choice="person">Sync one person…</button>
+                  <hr>
+                  <button type="button" data-sync-choice="preview">Preview only (don't apply)</button>
+                </div>
+              </div>
+              <div class="fs-menu-wrap">
+                <button class="fs-button" type="button" data-menu="pause">Pause ▾</button>
+                <div class="fs-menu" data-menu-panel="pause">
+                  <button type="button" data-pause-choice="hour">Pause for 1 hour</button>
+                  <button type="button" data-pause-choice="tomorrow">Pause until tomorrow</button>
+                  <button type="button" data-pause-choice="forever">Pause until I resume</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div data-home-state="syncing" hidden>
+            <p class="fs-headline">Syncing…</p>
+            <p class="fs-subline">Started 2 minutes ago because Memories changed.</p>
+            <div class="fs-state-actions">
+              <button class="fs-button fs-button-primary" type="button" data-nav="run">View details</button>
+              <div class="fs-menu-wrap">
+                <button class="fs-button" type="button" data-menu="pause2">Pause ▾</button>
+                <div class="fs-menu" data-menu-panel="pause2">
+                  <button type="button" data-pause-choice="hour">Pause for 1 hour</button>
+                  <button type="button" data-pause-choice="tomorrow">Pause until tomorrow</button>
+                  <button type="button" data-pause-choice="forever">Pause until I resume</button>
+                </div>
+              </div>
+            </div>
+            <div class="fs-card">
+              <div class="fs-progress-head"><strong>Checking digiKam photos</strong><span class="fs-meta">61% · 1,412 of 2,310</span></div>
+              <div class="fs-progress" role="progressbar" aria-label="Sync progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="61"><span style="width:61%"></span></div>
+              <div class="fs-live"><span><strong>1,388</strong> matched</span><span><strong>9</strong> changes</span><span><strong>0</strong> conflicts</span></div>
+            </div>
+          </div>
+
+          <div data-home-state="waiting-digikam" hidden>
+            <p class="fs-headline">Waiting for digiKam to close</p>
+            <p class="fs-subline">31 changes for digiKam are ready and will be applied when you quit digiKam.</p>
+            <p class="fs-subline-detail">12 changes for Memories were applied at 14:02.</p>
+            <div class="fs-state-actions">
+              <div class="fs-menu-wrap">
+                <button class="fs-button fs-button-primary" type="button" data-menu="sync3">Sync now ▾</button>
+                <div class="fs-menu" data-menu-panel="sync3">
+                  <button type="button" data-sync-choice="all">Sync everything now</button>
+                  <button type="button" data-sync-choice="person">Sync one person…</button>
+                  <hr>
+                  <button type="button" data-sync-choice="preview">Preview only (don't apply)</button>
+                </div>
+              </div>
+              <div class="fs-menu-wrap">
+                <button class="fs-button" type="button" data-menu="pause3">Pause ▾</button>
+                <div class="fs-menu" data-menu-panel="pause3">
+                  <button type="button" data-pause-choice="hour">Pause for 1 hour</button>
+                  <button type="button" data-pause-choice="tomorrow">Pause until tomorrow</button>
+                  <button type="button" data-pause-choice="forever">Pause until I resume</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div data-home-state="waiting-recognize" hidden>
+            <p class="fs-headline">Waiting for Recognize to finish</p>
+            <p class="fs-subline">Nextcloud is still recognising faces. Face Sync will start when it is idle.</p>
+            <p class="fs-subline-detail">Recognize has been busy since 02:10.</p>
+            <div class="fs-state-actions">
+              <div class="fs-menu-wrap">
+                <button class="fs-button fs-button-primary" type="button" data-menu="sync4">Sync now ▾</button>
+                <div class="fs-menu" data-menu-panel="sync4">
+                  <button type="button" data-sync-choice="all">Sync everything now</button>
+                  <button type="button" data-sync-choice="person">Sync one person…</button>
+                  <hr>
+                  <button type="button" data-sync-choice="preview">Preview only (don't apply)</button>
+                </div>
+              </div>
+              <div class="fs-menu-wrap">
+                <button class="fs-button" type="button" data-menu="pause4">Pause ▾</button>
+                <div class="fs-menu" data-menu-panel="pause4">
+                  <button type="button" data-pause-choice="hour">Pause for 1 hour</button>
+                  <button type="button" data-pause-choice="tomorrow">Pause until tomorrow</button>
+                  <button type="button" data-pause-choice="forever">Pause until I resume</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div data-home-state="waiting-connection" hidden>
+            <p class="fs-headline">Can't reach Nextcloud</p>
+            <p class="fs-subline">Retrying in 4 minutes. Last successful sync today 09:12.</p>
+            <p class="fs-subline-detail">nc.vassallo.cloud did not respond (timed out).</p>
+            <div class="fs-state-actions">
+              <button class="fs-button fs-button-primary" type="button">Try now</button>
+              <div class="fs-menu-wrap">
+                <button class="fs-button" type="button" data-menu="pause5">Pause ▾</button>
+                <div class="fs-menu" data-menu-panel="pause5">
+                  <button type="button" data-pause-choice="hour">Pause for 1 hour</button>
+                  <button type="button" data-pause-choice="tomorrow">Pause until tomorrow</button>
+                  <button type="button" data-pause-choice="forever">Pause until I resume</button>
+                </div>
+              </div>
+              <button class="fs-button" type="button" data-nav="settings">Check settings</button>
+            </div>
+          </div>
+
+          <div data-home-state="paused" hidden>
+            <p class="fs-headline" data-paused-headline>Paused until 18:00</p>
+            <p class="fs-subline">Nothing will change in either library until then.</p>
+            <div class="fs-state-actions">
+              <button class="fs-button fs-button-primary" type="button" data-resume>Resume</button>
+              <div class="fs-menu-wrap">
+                <button class="fs-button" type="button" data-menu="sync6">Sync now ▾</button>
+                <div class="fs-menu" data-menu-panel="sync6">
+                  <button type="button" data-sync-choice="all">Sync everything now</button>
+                  <button type="button" data-sync-choice="person">Sync one person…</button>
+                  <hr>
+                  <button type="button" data-sync-choice="preview">Preview only (don't apply)</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div data-home-state="off" hidden>
+            <p class="fs-headline">Automatic sync is off</p>
+            <p class="fs-subline">Last sync 3 days ago. Face Sync will not change anything on its own.</p>
+            <div class="fs-state-actions">
+              <button class="fs-button fs-button-primary" type="button" data-turn-on>Turn on automatic sync</button>
+              <div class="fs-menu-wrap">
+                <button class="fs-button" type="button" data-menu="sync7">Sync now ▾</button>
+                <div class="fs-menu" data-menu-panel="sync7">
+                  <button type="button" data-sync-choice="all">Sync everything now</button>
+                  <button type="button" data-sync-choice="person">Sync one person…</button>
+                  <hr>
+                  <button type="button" data-sync-choice="preview">Preview only (don't apply)</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div data-home-state="ready" hidden>
+            <p class="fs-headline">12 changes are ready to apply</p>
+            <p class="fs-subline">Preview finished 09:12 · 9 for Memories · 3 for digiKam</p>
+            <p class="fs-subline-detail">Automatic sync is on, but “Apply changes without asking” is off.</p>
+            <div class="fs-state-actions">
+              <button class="fs-button" type="button" data-nav="run-review">Review changes</button>
+              <button class="fs-button fs-button-primary" type="button" data-nav="run-review">Apply</button>
+            </div>
+          </div>
+
+          <div class="fs-attention" data-attention-card>
+            <div class="fs-attention-row">
+              <div><h3>12 faces have different names in each library</h3><div class="fs-meta">Newest from today 14:02. Sync continues around them.</div></div>
+              <button class="fs-button fs-button-small" type="button" data-nav="conflict">Review</button>
+            </div>
+            <div class="fs-attention-row">
+              <div><h3>3 faces could not be added</h3><div class="fs-meta">Memories rejected these faces.</div></div>
+              <button class="fs-button fs-button-small" type="button" data-nav="failure">Review</button>
+            </div>
+            <div class="fs-attention-row" data-enable-prompt>
+              <div class="fs-meta">Face Sync can tell you when this happens, even when this window is behind something else.</div>
+              <button class="fs-button fs-button-small" type="button" data-enable-notifications>Turn these on</button>
+            </div>
+          </div>
+
+          <div class="fs-card">
+            <h3>Libraries</h3>
+            <div class="fs-lib-row">
+              <span aria-hidden="true">▣</span><span>digiKam</span>
+              <span class="fs-lib-detail">/home/keith/Photos</span>
+              <span class="fs-pill is-good" data-lib-digikam>closed</span>
+            </div>
+            <div class="fs-lib-row">
+              <span aria-hidden="true">☁</span><span>Nextcloud</span>
+              <span class="fs-lib-detail">nc.vassallo.cloud · keith</span>
+              <span class="fs-pill is-good" data-lib-nextcloud>connected</span>
+            </div>
+            <div class="fs-lib-row">
+              <span aria-hidden="true">◌</span><span>Recognize</span>
+              <span class="fs-lib-detail">Face recognition in Nextcloud</span>
+              <span class="fs-pill is-off" data-lib-recognize>idle</span>
+            </div>
+          </div>
+
+          <div class="fs-row" style="margin:22px 0 6px">
+            <div class="fs-section-label" style="margin:0">Recent activity</div>
+            <button class="fs-button fs-button-quiet fs-button-small" type="button" data-nav="activity">All activity →</button>
+          </div>
+          <div class="fs-card fs-card-tight">
+            <button class="fs-activity-row" type="button" data-nav="run">
+              <span class="fs-activity-time">09:12 today</span>
+              <span>Applied 3 changes</span>
+              <span class="fs-tag">digiKam closed</span>
+            </button>
+            <button class="fs-activity-row" type="button" data-nav="run">
+              <span class="fs-activity-time">22:40 yest.</span>
+              <span>No changes</span>
+              <span class="fs-tag">daily check</span>
+            </button>
+            <button class="fs-activity-row" type="button" data-nav="run">
+              <span class="fs-activity-time">18:03 yest.</span>
+              <span>Applied 41 changes</span>
+              <span class="fs-tag">Memories changed</span>
+            </button>
+            <button class="fs-activity-row" type="button" data-nav="run">
+              <span class="fs-activity-time">17:10 yest.</span>
+              <span>12 conflicts need a decision</span>
+              <span class="fs-tag">you</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- ======================================================== ACTIVITY -->
+        <section class="fs-screen" data-screen="activity">
+          <div class="fs-row" style="margin-bottom:18px">
+            <div><h2>Activity</h2><p class="fs-lead" style="margin:0">Every sync, what started it and what it changed.</p></div>
+            <div class="fs-switchrow">
+              <select class="fs-select" aria-label="Filter by outcome"><option>All outcomes</option><option>Changed something</option><option>Needed a decision</option><option>Failed</option></select>
+              <select class="fs-select" aria-label="Filter by trigger"><option>All triggers</option><option>Automatic</option><option>Started by you</option></select>
+            </div>
+          </div>
+
+          <div class="fs-section-label">Today</div>
+          <div class="fs-card fs-card-tight">
+            <button class="fs-activity-row" type="button" data-nav="run"><span class="fs-activity-time">14:02</span><span>Waiting for digiKam · 12 applied, 31 waiting</span><span class="fs-tag">Memories changed</span></button>
+            <button class="fs-activity-row" type="button" data-nav="run"><span class="fs-activity-time">09:12</span><span>Applied 3 changes</span><span class="fs-tag">digiKam closed</span></button>
+          </div>
+
+          <div class="fs-section-label">Yesterday</div>
+          <div class="fs-card fs-card-tight">
+            <button class="fs-activity-row" type="button" data-nav="run"><span class="fs-activity-time">22:40</span><span>No changes</span><span class="fs-tag">daily check</span></button>
+            <button class="fs-activity-row" type="button" data-nav="run"><span class="fs-activity-time">18:03</span><span>Applied 41 changes</span><span class="fs-tag">Memories changed</span></button>
+            <button class="fs-activity-row" type="button" data-nav="run"><span class="fs-activity-time">17:10</span><span>12 conflicts · 29 applied</span><span class="fs-tag">you</span></button>
+            <button class="fs-activity-row" type="button" data-nav="run"><span class="fs-activity-time">08:14</span><span>Couldn't reach Nextcloud · retried and finished 08:46</span><span class="fs-tag">daily check</span></button>
+          </div>
+        </section>
+
+        <!-- ====================================================== RUN DETAIL -->
+        <section class="fs-screen" data-screen="run">
+          <button class="fs-button fs-button-quiet fs-button-small" style="padding-left:0;margin-bottom:10px" type="button" data-nav="activity">← Activity</button>
+
+          <div class="fs-row" style="margin-bottom:14px">
+            <div>
+              <h2 data-run-title>Sync · today 14:02</h2>
+              <p class="fs-lead" style="margin:0" data-run-lead>Started because Memories changed.</p>
+            </div>
+            <div class="fs-segment" aria-label="Run variant">
+              <button type="button" data-run-variant="deferred" aria-pressed="true">Waiting for digiKam</button>
+              <button type="button" data-run-variant="review" aria-pressed="false">Review mode</button>
+            </div>
+          </div>
+
+          <div class="fs-card">
+            <ul class="fs-timeline">
+              <li><span class="fs-mark" aria-hidden="true">●</span><span>Checked 2,140 photos in both libraries</span><span class="fs-meta">14:02 – 14:04</span></li>
+              <li><span class="fs-mark" aria-hidden="true">●</span><span>Applied 12 changes to Memories</span><span class="fs-meta">14:04</span></li>
+              <li data-run-deferred><span class="fs-mark is-wait" aria-hidden="true">◐</span><span>31 changes for digiKam waiting for digiKam to close</span><span class="fs-meta">since 14:04</span></li>
+              <li data-run-pending hidden><span class="fs-mark is-idle" aria-hidden="true">○</span><span>12 changes are ready to apply</span><span class="fs-meta">waiting for you</span></li>
+            </ul>
+          </div>
+
+          <div class="fs-stats">
+            <div class="fs-stat"><div class="fs-stat-number">1,988</div><div class="fs-stat-label">Already correct</div></div>
+            <div class="fs-stat"><div class="fs-stat-number">12</div><div class="fs-stat-label">Changes for Memories</div></div>
+            <div class="fs-stat"><div class="fs-stat-number">31</div><div class="fs-stat-label">Changes for digiKam</div></div>
+            <div class="fs-stat"><div class="fs-stat-number">0</div><div class="fs-stat-label">Need your decision</div></div>
+          </div>
+
+          <div class="fs-card">
+            <h3>What the sync found</h3>
+            <ul class="fs-review-list">
+              <li><span>Photos checked in digiKam</span><span class="fs-count">2,140</span></li>
+              <li><span>Photos matched to Nextcloud</span><span class="fs-count">2,108</span></li>
+              <li><span>Photos not found in Nextcloud</span><span class="fs-count">32</span></li>
+              <li><span>Name existing faces in Memories</span><span class="fs-count">9</span></li>
+              <li><span>Create face boxes in Memories</span><span class="fs-count">3</span></li>
+              <li><span>Create face boxes in digiKam</span><span class="fs-count">31</span></li>
+            </ul>
+          </div>
+
+          <div class="fs-card" data-run-apply-card hidden>
+            <div class="fs-row-start">
+              <span class="fs-iconbox" aria-hidden="true">✓</span>
+              <div>
+                <h3>A digiKam backup is created automatically</h3>
+                <div class="fs-meta">Face Sync makes a consistent database backup before the first local change.</div>
+              </div>
+            </div>
+            <div class="fs-setting-row" style="margin-top:14px">
+              <div><strong style="font-weight:500">Close digiKam before continuing</strong><div class="fs-meta">digiKam must be closed while Face Sync updates its face database.</div></div>
+              <label class="fs-toggle-note"><input type="checkbox"> I have closed digiKam</label>
+            </div>
+            <div class="fs-actions" style="margin-top:10px">
+              <button class="fs-button" type="button">Discard</button>
+              <button class="fs-button fs-button-primary" type="button">Apply 12 changes</button>
+            </div>
+          </div>
+
+          <div class="fs-card" data-run-backup>
+            <div class="fs-row"><span class="fs-meta">Backup created before the first digiKam change</span><span class="fs-meta">digikam4-run-88-20260915-140431.db</span></div>
+          </div>
+
+          <div class="fs-row" style="margin:22px 0 6px">
+            <div class="fs-section-label" style="margin:0">Log</div>
+            <button class="fs-button fs-button-quiet fs-button-small" type="button" data-nav="logs">Open Logs →</button>
+          </div>
+          <div class="fs-logview" style="max-height:150px">
+            <div class="fs-logline"><span class="fs-logtime">14:04:31</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">run 88</span><span>digiKam is running; 31 changes deferred</span></div>
+            <div class="fs-logline"><span class="fs-logtime">14:04:31</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">run 88</span><span>Applied 12 Memories changes</span></div>
+            <div class="fs-logline"><span class="fs-logtime">14:02:55</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">run 88</span><span>Scanning digiKam 2,140 of 2,310</span></div>
+          </div>
+        </section>
+
+        <!-- ================================================ NEEDS ATTENTION -->
+        <section class="fs-screen" data-screen="attention">
+          <h2>Needs attention</h2>
+          <p class="fs-lead">Face Sync keeps syncing everything else. These faces need you.</p>
+
+          <div class="fs-card">
+            <div class="fs-row">
+              <div>
+                <h3>Different names</h3>
+                <div class="fs-meta">The same face has a different name in digiKam and Memories. Newest from today 14:02.</div>
+              </div>
+              <div class="fs-switchrow">
+                <span class="fs-count">12 faces</span>
+                <button class="fs-button" type="button" data-nav="conflict">Review</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="fs-card">
+            <div class="fs-row">
+              <div>
+                <h3>Couldn't be added</h3>
+                <div class="fs-meta">Memories rejected these faces. Adjust the box, or keep them in digiKam only.</div>
+              </div>
+              <div class="fs-switchrow">
+                <span class="fs-count">3 faces</span>
+                <button class="fs-button" type="button" data-nav="failure">Review</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="fs-note" style="margin-top:18px">Faces you keep in one library are remembered. They are not offered again unless their name or box changes.</div>
+        </section>
+
+        <!-- ========================================================= CONFLICT -->
+        <section class="fs-screen" data-screen="conflict">
+          <div class="fs-row">
+            <div><h2>Who is this?</h2><p class="fs-lead">Choose the correct name for the highlighted face.</p></div>
+            <span class="fs-meta">1 / 12</span>
+          </div>
+          <div class="fs-conflict-grid">
+            <div>
+              <div class="fs-photo" role="img" aria-label="Photo preview with one face rectangle highlighted"><div class="fs-facebox"><span>Which name?</span></div></div>
+              <div class="fs-photo-caption">2021/07/21-07-26 15-44-40 0037.jpg · 58.6% overlap</div>
+            </div>
+            <div>
+              <button class="fs-name-choice" type="button" data-conflict-choice="digikam" aria-pressed="true"><span aria-hidden="true">▣</span><span><strong>Gail Vassallo</strong><span class="fs-meta">Keep the name from digiKam</span></span></button>
+              <button class="fs-name-choice" type="button" data-conflict-choice="memories" aria-pressed="false"><span aria-hidden="true">☁</span><span><strong>Angie Galea</strong><span class="fs-meta">Keep the name from Memories</span></span></button>
+              <label class="fs-check"><input type="checkbox"><span><strong style="font-weight:500">Use this choice for all remaining conflicts</strong><br><span class="fs-meta">Every unresolved conflict will receive the same choice.</span></span></label>
+            </div>
+          </div>
+          <div class="fs-actions">
+            <button class="fs-button" type="button" data-nav="attention">Back</button>
+            <button class="fs-button fs-button-primary" type="button" data-nav="attention">Save choice and continue</button>
+          </div>
+        </section>
+
+        <!-- ========================================================== FAILURE -->
+        <section class="fs-screen" data-screen="failure">
+          <div class="fs-row">
+            <div><h2>Face needs a decision</h2><p class="fs-lead">Memories rejected this face. Adjust the box, or keep it in digiKam only.</p></div>
+            <span class="fs-meta">1 / 3</span>
+          </div>
+          <div class="fs-conflict-grid">
+            <div>
+              <div class="fs-photo" role="img" aria-label="Photo preview with an adjustable face rectangle">
+                <div class="fs-facebox" style="border-color:var(--fs-brand)">
+                  <span style="background:var(--fs-brand);color:var(--fs-brand-ink)">Gail Vassallo</span>
+                  <i class="fs-handle" style="left:-7px;top:-7px"></i>
+                  <i class="fs-handle" style="right:-7px;top:-7px"></i>
+                  <i class="fs-handle" style="left:-7px;bottom:-7px"></i>
+                  <i class="fs-handle" style="right:-7px;bottom:-7px"></i>
+                </div>
+              </div>
+              <div class="fs-photo-caption">2023/02/23-02-25 11-02-18 0184.jpg</div>
+              <div class="fs-photo-caption">If the box is wrong, drag it or resize it before adding the face.</div>
+            </div>
+            <div>
+              <div class="fs-card fs-card-tight">
+                <h3>Gail Vassallo</h3>
+                <div class="fs-meta">In digiKam only · not yet in Memories</div>
+                <div class="fs-meta" style="margin-top:7px">Recognize could not read a face in this rectangle.</div>
+              </div>
+              <button class="fs-name-choice" type="button" data-failure-choice="keep" aria-pressed="false"><span aria-hidden="true">▣</span><span><strong>Keep only in digiKam</strong><span class="fs-meta">Ignore this face in future syncs.</span></span></button>
+              <button class="fs-name-choice" type="button" data-failure-choice="retry" aria-pressed="true"><span aria-hidden="true">☁</span><span><strong>Add using this box</strong><span class="fs-meta">Use the box shown, or adjust it first.</span></span></button>
+              <label class="fs-check"><input type="checkbox"><span><strong style="font-weight:500">Keep all remaining rejected faces where they are</strong><br><span class="fs-meta">They will be ignored in future syncs.</span></span></label>
+            </div>
+          </div>
+          <div class="fs-actions">
+            <button class="fs-button" type="button" data-nav="attention">Back</button>
+            <button class="fs-button fs-button-primary" type="button" data-nav="attention">Save decision and continue</button>
+          </div>
+        </section>
+
+        <!-- ============================================================= LOGS -->
+        <section class="fs-screen" data-screen="logs">
+          <h2>Logs</h2>
+          <p class="fs-lead">Everything the background service did, newest first.</p>
+          <div class="fs-logbar">
+            <div class="fs-switchrow">
+              <label class="fs-field"><span class="fs-meta">Level</span><select class="fs-select"><option>Info</option><option>Debug</option><option>Warnings</option><option>Errors</option></select></label>
+              <label class="fs-field"><span class="fs-meta">Run</span><select class="fs-select"><option>All</option><option>Run 88 · today 14:02</option><option>Run 87 · today 09:12</option></select></label>
+              <input class="fs-input" type="search" placeholder="Search" aria-label="Search logs">
+            </div>
+            <label class="fs-toggle-note"><input type="checkbox" checked> Follow</label>
+          </div>
+          <div class="fs-logview">
+            <div class="fs-logline"><span class="fs-logtime">14:04:31</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">run 88</span><span>digiKam is running; 31 changes deferred</span></div>
+            <div class="fs-logline"><span class="fs-logtime">14:04:31</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">run 88</span><span>Applied 12 Memories changes</span></div>
+            <div class="fs-logline"><span class="fs-logtime">14:02:55</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">run 88</span><span>Scanning digiKam 2,140 of 2,310</span></div>
+            <div class="fs-logline"><span class="fs-logtime">14:02:11</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">run 88</span><span>Loaded 13,713 Memories faces</span></div>
+            <div class="fs-logline"><span class="fs-logtime">14:02:10</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">coord</span><span>Starting run 88: Memories changed</span></div>
+            <div class="fs-logline"><span class="fs-logtime">13:52:10</span><span class="fs-lvl-debug">DEBUG</span><span class="fs-logrun">coord</span><span>Memories fingerprint changed; quiet period until 14:02:10</span></div>
+            <div class="fs-logline"><span class="fs-logtime">09:47:02</span><span class="fs-lvl-warn">WARN</span><span class="fs-logrun">run 87</span><span>Nextcloud timed out; retrying in 1 min</span></div>
+            <div class="fs-logline"><span class="fs-logtime">09:12:40</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">run 87</span><span>Applied 3 changes; run complete</span></div>
+            <div class="fs-logline"><span class="fs-logtime">08:01:02</span><span class="fs-lvl-info">INFO</span><span class="fs-logrun">coord</span><span>Face Sync service started</span></div>
+          </div>
+          <div class="fs-row" style="margin-top:14px">
+            <span class="fs-meta">Files: ~/.config/digikam-memories-sync/logs</span>
+            <button class="fs-button fs-button-small" type="button">Copy for bug report</button>
+          </div>
+        </section>
+
+        <!-- ========================================================= SETTINGS -->
+        <section class="fs-screen" data-screen="settings">
+          <h2>Settings</h2>
+          <p class="fs-lead">Set these once. Face Sync checks them before every sync.</p>
+
+          <div class="fs-card">
+            <h3>Libraries</h3>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">digiKam folder</strong><div class="fs-meta">/home/keith/Photos</div></div><button class="fs-button fs-button-small" type="button">Change</button></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Nextcloud</strong><div class="fs-meta">nc.vassallo.cloud · keith</div></div><button class="fs-button fs-button-small" type="button">Change</button></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Photos folder in Nextcloud</strong><div class="fs-meta">Photos</div></div><button class="fs-button fs-button-small" type="button">Change</button></div>
+            <div class="fs-actions" style="margin-top:12px"><span class="fs-meta fs-success" data-test-result aria-live="polite"></span><button class="fs-button fs-button-small" type="button" data-test-connection>Test connection</button></div>
+          </div>
+
+          <div class="fs-card">
+            <div class="fs-row" style="margin-bottom:6px">
+              <h3 style="margin:0">Automatic sync</h3>
+              <div class="fs-switch" role="group" aria-label="Automatic sync">
+                <button type="button" data-auto="on" aria-pressed="true">On</button>
+                <button type="button" data-auto="off" aria-pressed="false">Off</button>
+              </div>
+            </div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Apply changes without asking</strong><div class="fs-meta">Faces with two different names always wait for you.</div></div><label class="fs-toggle-note"><input type="checkbox" checked></label></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Wait after the last change</strong><div class="fs-meta">Stops a burst of edits becoming many small syncs.</div></div><div class="fs-switchrow"><input class="fs-input fs-inline-number" type="number" value="10" aria-label="Quiet period minutes"><span class="fs-meta">minutes</span></div></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Check for changes every</strong><div class="fs-meta">How often Face Sync asks Nextcloud whether anything moved.</div></div><select class="fs-select"><option>5 minutes</option><option>15 minutes</option><option>1 hour</option></select></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Sync at least every</strong><div class="fs-meta">A safety net for changes that slip past detection.</div></div><select class="fs-select"><option>6 hours</option><option selected>day</option><option>week</option></select></div>
+          </div>
+
+          <div class="fs-card">
+            <h3>Notifications</h3>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Faces need a decision</strong></div><label class="fs-toggle-note"><input type="checkbox" checked></label></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Connection problems</strong></div><label class="fs-toggle-note"><input type="checkbox" checked></label></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Every completed sync</strong><div class="fs-meta">Off by default. Most syncs change nothing.</div></div><label class="fs-toggle-note"><input type="checkbox"></label></div>
+            <div class="fs-setting-row">
+              <div><strong style="font-weight:500">Notify me in this browser</strong><div class="fs-meta" data-permission-state>Not asked yet. Used while Face Sync is open but behind another window.</div></div>
+              <div class="fs-switchrow">
+                <button class="fs-button fs-button-small" type="button" data-preview-notification>Preview</button>
+                <button class="fs-button fs-button-small" type="button" data-enable-notifications>Enable</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="fs-card">
+            <h3>Background service</h3>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Start Face Sync when I log in</strong><div class="fs-meta">Running since 08:01 today</div></div><label class="fs-toggle-note"><input type="checkbox" checked></label></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Add to application menu</strong><div class="fs-meta">Creates a shortcut that opens this window.</div></div><button class="fs-button fs-button-small" type="button">Add</button></div>
+          </div>
+
+          <div class="fs-card">
+            <h3>Storage</h3>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Backups</strong><div class="fs-meta">187 MB · keep the newest</div></div><div class="fs-switchrow"><input class="fs-input fs-inline-number" type="number" value="10" aria-label="Backups to keep"><button class="fs-button fs-button-small" type="button">Open folder</button></div></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Logs</strong><div class="fs-meta">Keep for</div></div><div class="fs-switchrow"><input class="fs-input fs-inline-number" type="number" value="30" aria-label="Log days"><span class="fs-meta">days</span><button class="fs-button fs-button-small" type="button">Open folder</button></div></div>
+          </div>
+
+          <div class="fs-card">
+            <h3>Advanced</h3>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Rebuild face ledger</strong><div class="fs-meta">Re-learns which faces already agree. Changes nothing in either library.</div></div><button class="fs-button fs-button-small" type="button">Rebuild</button></div>
+            <div class="fs-setting-row"><div><strong style="font-weight:500">Forget faces kept in one library</strong><div class="fs-meta">Offers previously ignored faces again on the next sync.</div></div><button class="fs-button fs-button-small" type="button">Forget</button></div>
+          </div>
+        </section>
+
+        <!-- ============================================================ SETUP -->
+        <section class="fs-screen" data-screen="setup">
+          <h2>You're connected</h2>
+          <p class="fs-lead">Last step. Face Sync can keep both libraries in sync on its own.</p>
+
+          <div class="fs-card">
+            <div class="fs-lib-row"><span aria-hidden="true">▣</span><span>digiKam</span><span class="fs-lib-detail">/home/keith/Photos</span><span class="fs-pill is-good">found</span></div>
+            <div class="fs-lib-row"><span aria-hidden="true">☁</span><span>Nextcloud</span><span class="fs-lib-detail">nc.vassallo.cloud · keith</span><span class="fs-pill is-good">connected</span></div>
+            <div class="fs-lib-row"><span aria-hidden="true">◌</span><span>Recognize</span><span class="fs-lib-detail">Face recognition and the Face Sync companion app</span><span class="fs-pill is-good">ready</span></div>
+          </div>
+
+          <div class="fs-card">
+            <label class="fs-check" style="margin-top:0">
+              <input type="checkbox" checked>
+              <span><strong style="font-weight:500">Keep both libraries in sync automatically</strong><br>
+              <span class="fs-meta">Face Sync checks for changes in the background, waits until digiKam is closed before changing it, and only asks you when two names disagree.</span></span>
+            </label>
+            <label class="fs-check">
+              <input type="checkbox" checked>
+              <span><strong style="font-weight:500">Start Face Sync when I log in</strong><br>
+              <span class="fs-meta">Without this, syncing only happens while this window is open.</span></span>
+            </label>
+          </div>
+
+          <div class="fs-actions">
+            <button class="fs-button" type="button" data-nav="home">Back</button>
+            <button class="fs-button fs-button-primary" type="button" data-nav="home">Finish</button>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <aside class="fs-toast" data-toast hidden aria-live="polite">
+      <div class="fs-toast-head">
+        <span class="fs-logo" aria-hidden="true">◎</span>
+        <span>Face Sync</span>
+        <span class="fs-toast-origin">127.0.0.1:47818</span>
+        <button class="fs-toast-close" type="button" data-toast-close aria-label="Dismiss">✕</button>
+      </div>
+      <div class="fs-toast-body" role="button" tabindex="0" data-toast-open>
+        <strong data-toast-title>12 faces need a decision</strong>
+        <span class="fs-meta" data-toast-message>The same face has a different name in each library.</span>
+      </div>
+      <span class="fs-toast-tag">Prototype mock</span>
+    </aside>
+  </section>
+
+  <script>
+    (() => {
+      const root = document.getElementById('face-sync-prototypes');
+
+      /* ------------------------------------------------------ home states */
+      const TOP = {
+        'insync':             { dot: '',        text: 'Connected as keith',        digikam: ['is-good','closed'], nextcloud: ['is-good','connected'], recognize: ['is-off','idle'] },
+        'syncing':            { dot: '',        text: 'Syncing…',                  digikam: ['is-good','closed'], nextcloud: ['is-good','connected'], recognize: ['is-off','idle'] },
+        'waiting-digikam':    { dot: 'is-wait', text: 'Waiting for digiKam',       digikam: ['is-wait','open'],   nextcloud: ['is-good','connected'], recognize: ['is-off','idle'] },
+        'waiting-recognize':  { dot: 'is-wait', text: 'Waiting for Recognize',     digikam: ['is-good','closed'], nextcloud: ['is-good','connected'], recognize: ['is-wait','busy'] },
+        'waiting-connection': { dot: 'is-bad',  text: "Can't reach Nextcloud",     digikam: ['is-good','closed'], nextcloud: ['is-bad','unreachable'], recognize: ['is-off','unknown'] },
+        'paused':             { dot: 'is-off',  text: 'Paused',                    digikam: ['is-good','closed'], nextcloud: ['is-good','connected'], recognize: ['is-off','idle'] },
+        'off':                { dot: 'is-off',  text: 'Automatic sync is off',     digikam: ['is-good','closed'], nextcloud: ['is-good','connected'], recognize: ['is-off','idle'] },
+        'ready':              { dot: '',        text: '12 changes ready to apply', digikam: ['is-good','closed'], nextcloud: ['is-good','connected'], recognize: ['is-off','idle'] },
+      };
+
+      function setPill(element, [variant, label]) {
+        element.className = 'fs-pill ' + variant;
+        element.textContent = label;
+      }
+
+      function setHomeState(name) {
+        root.querySelectorAll('[data-home-state]').forEach((block) => {
+          block.hidden = block.dataset.homeState !== name;
+        });
+        root.querySelectorAll('[data-state]').forEach((button) => {
+          button.setAttribute('aria-pressed', String(button.dataset.state === name));
+        });
+        const top = TOP[name];
+        root.querySelector('[data-top-dot]').className = 'fs-dot ' + top.dot;
+        root.querySelector('[data-top-status]').textContent = top.text;
+        setPill(root.querySelector('[data-lib-digikam]'), top.digikam);
+        setPill(root.querySelector('[data-lib-nextcloud]'), top.nextcloud);
+        setPill(root.querySelector('[data-lib-recognize]'), top.recognize);
+      }
+
+      /* --------------------------------------------------------- sections */
+      const RAIL_PARENT = { conflict: 'attention', failure: 'attention', run: 'activity' };
+
+      function show(screen) {
+        root.querySelectorAll('[data-screen]').forEach((section) => {
+          section.classList.toggle('is-active', section.dataset.screen === screen);
+        });
+        const highlighted = RAIL_PARENT[screen] || screen;
+        root.querySelectorAll('.fs-rail-item').forEach((item) => {
+          if (item.dataset.nav === highlighted) item.setAttribute('aria-current', 'page');
+          else item.removeAttribute('aria-current');
+        });
+        closeMenus();
+      }
+
+      function setRunVariant(variant) {
+        const review = variant === 'review';
+        root.querySelectorAll('[data-run-variant]').forEach((button) => {
+          button.setAttribute('aria-pressed', String(button.dataset.runVariant === variant));
+        });
+        root.querySelector('[data-run-deferred]').hidden = review;
+        root.querySelector('[data-run-pending]').hidden = !review;
+        root.querySelector('[data-run-apply-card]').hidden = !review;
+        root.querySelector('[data-run-backup]').hidden = review;
+        root.querySelector('[data-run-title]').textContent = review ? 'Sync · today 09:12' : 'Sync · today 14:02';
+        root.querySelector('[data-run-lead]').textContent = review
+          ? 'Started by the daily check. Waiting for you to apply.'
+          : 'Started because Memories changed.';
+      }
+
+      root.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => {
+        const target = button.dataset.nav;
+        if (target === 'run-review') { setRunVariant('review'); show('run'); return; }
+        if (target === 'run') { setRunVariant('deferred'); show('run'); return; }
+        show(target);
+      }));
+      root.querySelectorAll('[data-run-variant]').forEach((button) =>
+        button.addEventListener('click', () => setRunVariant(button.dataset.runVariant)));
+
+      /* ------------------------------------------------------------ menus */
+      function closeMenus() {
+        root.querySelectorAll('.fs-menu').forEach((menu) => menu.classList.remove('is-open'));
+      }
+      root.querySelectorAll('[data-menu]').forEach((button) => button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const panel = root.querySelector('[data-menu-panel="' + button.dataset.menu + '"]');
+        const open = panel.classList.contains('is-open');
+        closeMenus();
+        panel.classList.toggle('is-open', !open);
+      }));
+      document.addEventListener('click', closeMenus);
+      root.querySelectorAll('.fs-menu').forEach((menu) => menu.addEventListener('click', (event) => event.stopPropagation()));
+
+      const PAUSE_LABEL = { hour: 'Paused until 15:04', tomorrow: 'Paused until tomorrow 08:00', forever: 'Paused' };
+      root.querySelectorAll('[data-pause-choice]').forEach((button) => button.addEventListener('click', () => {
+        root.querySelector('[data-paused-headline]').textContent = PAUSE_LABEL[button.dataset.pauseChoice];
+        closeMenus();
+        setHomeState('paused');
+        show('home');
+      }));
+      root.querySelector('[data-resume]').addEventListener('click', () => { setHomeState('insync'); });
+      root.querySelector('[data-turn-on]').addEventListener('click', () => { setHomeState('insync'); });
+      root.querySelectorAll('[data-sync-choice]').forEach((button) => button.addEventListener('click', () => {
+        closeMenus();
+        setHomeState('syncing');
+        show('home');
+      }));
+
+      /* ------------------------------------------------------- attention */
+      const attentionToggle = root.querySelector('[data-attention-toggle]');
+      function renderAttention() {
+        const on = attentionToggle.checked;
+        root.querySelector('[data-attention-card]').hidden = !on;
+        root.querySelector('[data-rail-badge]').hidden = !on;
+        // The zero-permission fallback: the tab title carries the count.
+        document.title = (on ? '(15) ' : '') + 'Face Sync · phase 2 prototype';
+      }
+      attentionToggle.addEventListener('change', renderAttention);
+
+      /* ----------------------------------------------------------- choices */
+      root.querySelectorAll('[data-conflict-choice]').forEach((button) => button.addEventListener('click', () => {
+        root.querySelectorAll('[data-conflict-choice]').forEach((peer) => peer.setAttribute('aria-pressed', String(peer === button)));
+      }));
+      root.querySelectorAll('[data-failure-choice]').forEach((button) => button.addEventListener('click', () => {
+        root.querySelectorAll('[data-failure-choice]').forEach((peer) => peer.setAttribute('aria-pressed', String(peer === button)));
+      }));
+      root.querySelectorAll('[data-auto]').forEach((button) => button.addEventListener('click', () => {
+        root.querySelectorAll('[data-auto]').forEach((peer) => peer.setAttribute('aria-pressed', String(peer === button)));
+        setHomeState(button.dataset.auto === 'off' ? 'off' : 'insync');
+      }));
+      root.querySelector('[data-test-connection]').addEventListener('click', () => {
+        root.querySelector('[data-test-result]').textContent = '✓ Both libraries reachable';
+      });
+
+      /* ------------------------------------------------------------ theme */
+      root.querySelectorAll('[data-theme-choice]').forEach((button) => button.addEventListener('click', () => {
+        root.querySelectorAll('[data-theme-choice]').forEach((peer) => peer.setAttribute('aria-pressed', String(peer === button)));
+        if (button.dataset.themeChoice === 'auto') root.removeAttribute('data-theme');
+        else root.setAttribute('data-theme', button.dataset.themeChoice);
+      }));
+
+      root.querySelectorAll('[data-state]').forEach((button) => button.addEventListener('click', () => {
+        setHomeState(button.dataset.state);
+        show('home');
+      }));
+
+      /* ----------------------------------------------------- notifications */
+      const toast = root.querySelector('[data-toast]');
+      let permission = 'default';
+
+      function showToast(title, message) {
+        root.querySelector('[data-toast-title]').textContent = title;
+        root.querySelector('[data-toast-message]').textContent = message;
+        toast.hidden = false;
+      }
+      root.querySelector('[data-toast-close]').addEventListener('click', () => { toast.hidden = true; });
+      root.querySelector('[data-toast-open]').addEventListener('click', () => {
+        toast.hidden = true;
+        show('attention');
+      });
+
+      root.querySelectorAll('[data-enable-notifications]').forEach((button) =>
+        button.addEventListener('click', () => {
+          permission = 'granted';
+          renderPermission();
+          showToast('Notifications are on', 'This is what Face Sync will look like when something needs you.');
+        }));
+
+      root.querySelector('[data-preview-notification]').addEventListener('click', () =>
+        showToast('12 faces need a decision', 'The same face has a different name in each library.'));
+
+      function renderPermission() {
+        const granted = permission === 'granted';
+        root.querySelector('[data-permission-state]').textContent = granted
+          ? 'On. Used while Face Sync is open but behind another window.'
+          : 'Not asked yet. Used while Face Sync is open but behind another window.';
+        root.querySelector('[data-enable-prompt]').hidden = granted;
+      }
+
+      setHomeState('insync');
+      setRunVariant('deferred');
+      renderAttention();
+      renderPermission();
+      show('home');
+    })();
+  </script>
+</div>
+</body>
+</html>
