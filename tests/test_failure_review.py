@@ -122,6 +122,33 @@ class FailureReviewTest(unittest.TestCase):
         self.state.initialize_apply(self.run_id, plan)  # must not raise
         self.assertEqual(self.state.apply_counts(self.run_id)["pending"], 4)
 
+    def test_applying_a_reviewed_face_does_not_block_the_next_apply(self):
+        """Applying a reviewed face overwrites its review marker with its
+        result. The plan check must not then read the finished row as an
+        unexplained edit, or one more face left to add becomes unreachable."""
+        failures = self.failures()
+        self.state.resolve_failed_action(
+            self.run_id, failures[0]["id"], "retry",
+            rect=[0.5, 0.5, 0.2, 0.2], apply_to_remaining=True,
+        )
+        plan = build_apply_plan(
+            {"summary": {"inserted": 4}, "actions": self.plan},
+            self.state.plan_conflicts(self.run_id),
+        )
+        self.state.initialize_apply(self.run_id, plan)
+        # Everything but the last one goes through, as a partial apply would.
+        pending = self.state.pending_apply_actions(self.run_id)
+        for item in pending[:-1]:
+            self.state.finish_apply_action(
+                item["id"], "applied", result={"changed": True, "nc_detection_id": 1},
+            )
+        self.state.finish_apply(self.run_id, "apply_failed")
+
+        self.state.initialize_apply(self.run_id, plan)  # must not raise
+        counts = self.state.apply_counts(self.run_id)
+        self.assertEqual(counts["applied"], 3)
+        self.assertEqual(counts["pending"], 1)
+
 
 class PartlyAppliedHomeTest(unittest.TestCase):
     """A run holding reviewed faces must not vanish from the home screen."""

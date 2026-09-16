@@ -544,13 +544,20 @@ class StateStore:
                 raise ValueError("The saved Apply plan does not match this preview.")
             if existing:
                 saved = self.conn.execute(
-                    """SELECT id,action_json,result_json FROM run_actions
+                    """SELECT id,status,action_json,result_json FROM run_actions
                        WHERE run_id = ? ORDER BY position""",
                     (run_id,),
                 ).fetchall()
                 plan_matches = True
                 confirmed_upgrades: list[tuple[str, int]] = []
                 for row, original in zip(saved, plan, strict=True):
+                    if row["status"] != "pending":
+                        # Settled work, which this apply will not touch. A
+                        # reviewed face that has since been applied has had its
+                        # review marker overwritten by its apply result, so
+                        # checking it here would reject a plan for being
+                        # different in exactly the way it was asked to be.
+                        continue
                     current = json.loads(row["action_json"])
                     if current == original:
                         continue
