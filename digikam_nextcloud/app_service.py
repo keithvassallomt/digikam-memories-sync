@@ -524,11 +524,11 @@ class AppService:
             str(settings["nextcloud_url"]), user_id, password, http_workers=1
         )
 
-    def memories_fingerprint(self) -> str | None:
-        """A value that changes when a named face moves in Memories.
+    def memories_changes(self) -> Any:
+        """What one look at Memories saw, or None if it could not be asked.
 
-        None means the question could not be asked, which is different from
-        "nothing changed" and must not be treated as an answer.
+        None is different from "nothing changed" and must not be treated as an
+        answer.
         """
         backend = self._short_backend()
         if backend is None:
@@ -536,9 +536,14 @@ class AppService:
         try:
             if not getattr(backend, "supports_change_fingerprint", False):
                 return None
-            return backend.change_fingerprint()
+            return backend.read_changes()
         finally:
             backend.close()
+
+    def memories_fingerprint(self) -> str | None:
+        """A value that changes when a named face moves in Memories."""
+        seen = self.memories_changes()
+        return None if seen is None else seen.value
 
     def recognize_busy(self) -> bool:
         """Whether Recognize is working through its own queue."""

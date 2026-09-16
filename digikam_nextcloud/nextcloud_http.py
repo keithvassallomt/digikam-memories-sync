@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Optional
 from urllib.parse import quote, unquote
 
+from . import fingerprint as fingerprint_module
 from .constants import DAV_NS, IMAGE_EXT
 from .http_client import KeepAliveHttpClient
 from .matching import digikam_path_candidates
@@ -372,11 +373,13 @@ class NextcloudHTTP:
             raise NextcloudConnectionError(f"The {description} response was invalid.")
         return payload
 
-    def change_fingerprint(self) -> str:
-        """A short value that changes whenever a named face moves.
+    def read_changes(self) -> fingerprint_module.Fingerprint:
+        """What one look at Memories saw: a value, and a hash per person.
 
         Comparing it costs one request, which is what makes polling for
-        changes cheap enough to do every few minutes.
+        changes cheap enough to do every few minutes. An app too old to report
+        the per-person hashes simply reports none, and a sync then looks at
+        everyone, which is what it always did.
         """
         if not self.supports_change_fingerprint:
             raise NextcloudConnectionError(
@@ -386,15 +389,25 @@ class NextcloudHTTP:
         payload = self._json_request(self.changes_url(), "the Memories change fingerprint")
         detections = payload.get("detections") or {}
         clusters = payload.get("clusters") or {}
-        return ":".join(
-            str(part)
-            for part in (
-                detections.get("count", 0),
-                detections.get("checksum", ""),
-                clusters.get("count", 0),
-                clusters.get("titles_hash", ""),
-            )
+        people = detections.get("people")
+        return fingerprint_module.Fingerprint(
+            value=":".join(
+                str(part)
+                for part in (
+                    detections.get("count", 0),
+                    detections.get("checksum", ""),
+                    clusters.get("count", 0),
+                    clusters.get("titles_hash", ""),
+                )
+            ),
+            people={
+                str(name): str(digest) for name, digest in people.items()
+            } if isinstance(people, dict) else {},
         )
+
+    def change_fingerprint(self) -> str:
+        """A short value that changes whenever a named face moves."""
+        return self.read_changes().value
 
     def recognize_busy(self) -> bool:
         """Whether Recognize is working through its own queue right now."""

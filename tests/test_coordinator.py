@@ -141,6 +141,9 @@ class FakeApp:
     def recognize_busy(self):
         return self.busy
 
+    def memories_changes(self):
+        return None
+
     def memories_fingerprint(self):
         return None
 
@@ -284,6 +287,28 @@ class StartingNewWorkTest(unittest.TestCase):
         self.assertEqual(self.app.started[0]["trigger"], "memories_changed")
         self.assertIsNone(
             self.state.get_state("pending_trigger"), "the trigger was used up")
+
+    def test_a_change_that_names_one_person_looks_at_only_them(self):
+        """A full preview of a real library takes minutes. Most of what
+        triggers one is a single person being named or corrected."""
+        engine = self.coordinator(automation={"enabled": True})
+        self.due_trigger()
+        self.state.set_state("last_synced_memories_fingerprint", "nc0")
+        self.state.set_state("last_seen_memories_fingerprint", "nc1")
+        self.state.set_state("last_synced_memories_people", {"April": "x"})
+        self.state.set_state("last_seen_memories_people", {"April": "y"})
+        engine.tick()
+        self.assertEqual(self.app.started[0]["scope"], "person")
+        self.assertEqual(self.app.started[0]["person"], "April")
+
+    def test_a_change_nobody_can_be_blamed_for_looks_at_everyone(self):
+        engine = self.coordinator(automation={"enabled": True})
+        self.due_trigger()
+        self.state.set_state("last_synced_memories_fingerprint", "nc0")
+        self.state.set_state("last_seen_memories_fingerprint", "nc1")
+        engine.tick()
+        self.assertEqual(self.app.started[0]["scope"], "all")
+        self.assertNotIn("person", self.app.started[0])
 
     def test_a_busy_recognize_holds_the_sync_but_keeps_the_trigger(self):
         engine = self.coordinator(automation={"enabled": True})

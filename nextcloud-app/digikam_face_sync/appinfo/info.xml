@@ -13,7 +13,7 @@ Also reports a cheap fingerprint of your named faces, so Face Sync can tell
 whether anything changed without reading the whole library, and whether
 Recognize is busy so it can wait its turn.
 	]]></description>
-	<version>0.5.0</version>
+	<version>0.6.0</version>
 	<licence>agpl</licence>
 	<author mail="keith@vassallo.cloud">Keith Vassallo</author>
 	<namespace>DigikamFaceSync</namespace>

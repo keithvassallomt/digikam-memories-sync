@@ -33,6 +33,34 @@ We need to start with a proper design document based on the above, including UI 
 
 Not part of phase 2. Recorded so the reasoning is not lost.
 
+## Sync one person when only one person changed — done
+
+A full preview takes minutes on this library, and most of what triggers one is
+a single person being named or corrected. Both fingerprints now carry a hash
+per person, so a trigger can say who moved, and a change that names exactly one
+person starts a run scoped to them.
+
+Reading the per-person hashes is free: it is the same scan that produced the
+whole-library value. About 20 ms over 13,756 face regions and 133 people.
+
+Two things must stay conservative, and do. A change no one can be blamed for
+looks at everyone: an older companion app, a digiKam face on a tag that is not
+a person, a rename, which reads as two people rather than one. And the daily
+fallback sweep is never scoped, because it exists to catch what the
+fingerprints missed.
+
+The bookkeeping is the subtle half. A scoped run only learned about its own
+person, so it promotes that person's hash and leaves the whole-library values
+and the fallback clock alone. The library still reads as out of step, the next
+poll picks up the next person, and a queue of changed people drains one run at
+a time rather than one run covering work it never looked at.
+
+## Cross-platform process detection — done
+
+macOS and Windows can now tell whether digiKam is open, through `psutil` in the
+`desktop` extra. Linux keeps the dependency-free `/proc` scan. Confirmed
+working on both platforms.
+
 ## Trust one library — done
 
 I know my digiKam library is correct. So both manual and automatic syncs need

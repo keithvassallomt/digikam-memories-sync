@@ -296,13 +296,29 @@ class Coordinator:
             # as soon as Recognize is done rather than being forgotten.
             LOG.info("Recognize is busy; holding the %s sync", reason)
             return None
+        # Most of what triggers a sync is one person being named or
+        # corrected, and looking at only that person turns minutes of scanning
+        # into seconds. Anything the fingerprints cannot pin on one person
+        # still looks at everyone.
         try:
-            started = self.app.start_sync({"scope": "all", "trigger": reason})
+            person = self.watcher.scope_for(reason)
+        except Exception:
+            LOG.exception("Could not work out who changed")
+            person = None
+        request = (
+            {"scope": "person", "person": person, "trigger": reason} if person
+            else {"scope": "all", "trigger": reason}
+        )
+        try:
+            started = self.app.start_sync(request)
         except Exception:
             LOG.exception("Could not start the %s sync", reason)
             return None
         self.watcher.consume()
         self.watcher.stash_for_run(int(started["run_id"]))
         self.started_by_trigger.append(reason)
-        LOG.info("Started run %s because %s", started["run_id"], reason)
+        LOG.info(
+            "Started run %s because %s (%s)",
+            started["run_id"], reason, person or "everyone",
+        )
         return reason

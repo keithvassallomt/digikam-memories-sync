@@ -71,6 +71,12 @@ Face Sync remembers the name both libraries last agreed on for each face, so a
 rename in either one is applied to the other rather than queued as a question.
 Only a face renamed on both sides, or one with no history, waits for you.
 
+Both libraries are also fingerprinted per person, so a change that belongs to
+one person is synced by looking at that person rather than at everything. That
+turns the common case, one person being named or corrected, from minutes into
+seconds. A change that cannot be pinned on exactly one person, and the daily
+sweep, still look at everyone.
+
 ## What a sync does
 
 Three settings shape every sync, manual or automatic.

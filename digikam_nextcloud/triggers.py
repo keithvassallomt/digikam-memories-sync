@@ -34,6 +34,12 @@ IN_FLIGHT = "in_flight_fingerprints"
 DIGIKAM_SEEN = "last_seen_digikam_fingerprint"
 MEMORIES_SEEN = "last_seen_memories_fingerprint"
 LAST_COMPLETED_AT = "last_completed_at"
+# The same four values again, per person. A change that names one person can
+# be synced by looking at that person, which is minutes of scanning saved.
+DIGIKAM_PEOPLE = "last_synced_digikam_people"
+MEMORIES_PEOPLE = "last_synced_memories_people"
+DIGIKAM_PEOPLE_SEEN = "last_seen_digikam_people"
+MEMORIES_PEOPLE_SEEN = "last_seen_memories_people"
 
 # A run that reached one of these told us the truth about both libraries.
 SETTLED_STATUSES = frozenset(
@@ -186,12 +192,13 @@ class TriggerWatcher:
             return pending
         self.state.set_state(DIGIKAM_MTIME, mtime)
         try:
-            current = fingerprint_module.digikam_fingerprint(database)
+            seen = fingerprint_module.read_digikam(database)
         except Exception:
             LOG.exception("Could not read the digiKam library")
             return pending
+        self.state.set_state(DIGIKAM_PEOPLE_SEEN, seen.people)
         return self.observe(
-            pending, DIGIKAM_CHANGED, current, DIGIKAM_SEEN, DIGIKAM_FINGERPRINT, now
+            pending, DIGIKAM_CHANGED, seen.value, DIGIKAM_SEEN, DIGIKAM_FINGERPRINT, now
         )
 
     def check_memories(self, pending: Pending, now: datetime) -> Pending:
@@ -202,14 +209,15 @@ class TriggerWatcher:
             return pending
         self.state.set_state(MEMORIES_CHECKED_AT, now.isoformat())
         try:
-            current = self.app.memories_fingerprint()
+            seen = self.app.memories_changes()
         except Exception as error:
             LOG.debug("Could not read the Memories fingerprint: %s", error)
             return pending
-        if current is None:
+        if seen is None:
             return pending
+        self.state.set_state(MEMORIES_PEOPLE_SEEN, dict(seen.people))
         return self.observe(
-            pending, MEMORIES_CHANGED, current, MEMORIES_SEEN, MEMORIES_FINGERPRINT, now
+            pending, MEMORIES_CHANGED, seen.value, MEMORIES_SEEN, MEMORIES_FINGERPRINT, now
         )
 
     def check_interval(self, pending: Pending, now: datetime) -> Pending:
@@ -227,6 +235,46 @@ class TriggerWatcher:
         # No quiet period: nothing is changing, so there is nothing to wait for.
         return note_change(pending, INTERVAL, now, 0.0)
 
+    # ------------------------------------------------------------- who changed
+
+    def changed_people(self) -> set[str] | None:
+        """Who has changed since the last sync, or None if it cannot be said.
+
+        None is the answer whenever a library has moved but cannot attribute
+        the movement: an older companion app, or a digiKam change outside any
+        person's faces. The caller then looks at everyone, as it always did.
+        """
+        from . import fingerprint as fingerprint_module
+
+        names: set[str] = set()
+        for value_seen, value_synced, people_seen, people_synced in (
+            (DIGIKAM_SEEN, DIGIKAM_FINGERPRINT, DIGIKAM_PEOPLE_SEEN, DIGIKAM_PEOPLE),
+            (MEMORIES_SEEN, MEMORIES_FINGERPRINT, MEMORIES_PEOPLE_SEEN, MEMORIES_PEOPLE),
+        ):
+            moved = self.state.get_state(value_seen) != self.state.get_state(value_synced)
+            side = fingerprint_module.changed_people(
+                self.state.get_state(people_synced), self.state.get_state(people_seen)
+            )
+            if moved and not side:
+                return None
+            names |= side
+        return names
+
+    def scope_for(self, reason: str) -> str | None:
+        """The one person this sync can look at, or None for everyone.
+
+        A full preview of this library takes minutes, and most of what
+        triggers one is a single person being named or corrected.
+        """
+        if reason == INTERVAL:
+            # The fallback is there to catch what the fingerprints missed, so
+            # it must not let them narrow it.
+            return None
+        names = self.changed_people()
+        if names is None or len(names) != 1:
+            return None
+        return next(iter(names)) or None
+
     # --------------------------------------------------- fingerprint bookkeeping
 
     def stash_for_run(self, run_id: int) -> None:
@@ -239,18 +287,44 @@ class TriggerWatcher:
         from . import fingerprint as fingerprint_module
 
         digikam = None
+        digikam_people: dict[str, str] = {}
         if database:
             try:
-                digikam = fingerprint_module.digikam_fingerprint(database)
+                seen = fingerprint_module.read_digikam(database)
+                digikam, digikam_people = seen.value, dict(seen.people)
             except Exception:
                 digikam = None
+        memories = None
+        memories_people: dict[str, str] = {}
         try:
-            memories = self.app.memories_fingerprint()
+            seen = self.app.memories_changes()
+            if seen is not None:
+                memories, memories_people = seen.value, dict(seen.people)
         except Exception:
             memories = None
         self.state.set_state(
-            IN_FLIGHT, {"run_id": int(run_id), "digikam": digikam, "memories": memories}
+            IN_FLIGHT,
+            {
+                "run_id": int(run_id),
+                "digikam": digikam,
+                "memories": memories,
+                "digikam_people": digikam_people,
+                "memories_people": memories_people,
+            },
         )
+
+    def _promote_person(self, key: str, stashed: Any, person: str) -> None:
+        """Bring one person's entry into step, leaving everyone else alone."""
+        current = self.state.get_state(key)
+        merged = dict(current) if isinstance(current, dict) else {}
+        source = stashed if isinstance(stashed, dict) else {}
+        wanted = person.strip().lower()
+        for name in [name for name in merged if str(name).strip().lower() == wanted]:
+            merged.pop(name)
+        for name, digest in source.items():
+            if str(name).strip().lower() == wanted:
+                merged[str(name)] = str(digest)
+        self.state.set_state(key, merged)
 
     def promote_finished(self) -> bool:
         """Once a run settles, treat what it saw as the synced state."""
@@ -260,10 +334,23 @@ class TriggerWatcher:
         run = self.state.run(int(stashed.get("run_id") or 0))
         if run is None or str(run.get("status")) not in SETTLED_STATUSES:
             return False
+        person = str(run.get("person") or "") if str(run.get("mode")) == "person" else ""
+        if person:
+            # A scoped run only learned about one person. Promoting the
+            # whole-library values would mark everyone else's changes as
+            # synced, so they stay as they were and the next poll picks up the
+            # next person. The fallback clock is left alone for the same
+            # reason: nothing has swept the whole library yet.
+            self._promote_person(DIGIKAM_PEOPLE, stashed.get("digikam_people"), person)
+            self._promote_person(MEMORIES_PEOPLE, stashed.get("memories_people"), person)
+            self.state.clear_state(IN_FLIGHT)
+            return True
         if stashed.get("digikam"):
             self.state.set_state(DIGIKAM_FINGERPRINT, stashed["digikam"])
         if stashed.get("memories"):
             self.state.set_state(MEMORIES_FINGERPRINT, stashed["memories"])
+        self.state.set_state(DIGIKAM_PEOPLE, dict(stashed.get("digikam_people") or {}))
+        self.state.set_state(MEMORIES_PEOPLE, dict(stashed.get("memories_people") or {}))
         self.state.set_state(LAST_COMPLETED_AT, _now().isoformat())
         self.state.clear_state(IN_FLIGHT)
         return True

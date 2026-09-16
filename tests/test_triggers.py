@@ -121,19 +121,78 @@ class DigikamFingerprintTest(unittest.TestCase):
     def test_a_missing_library_has_no_modification_time(self):
         self.assertEqual(fingerprint.source_mtime(Path(self.tmp.name) / "gone.db"), 0.0)
 
+    # ------------------------------------------------------- who changed
+
+    def people(self):
+        return fingerprint.read_digikam(self.path).people
+
+    def test_each_person_is_hashed_on_their_own(self):
+        self.change("INSERT INTO Tags VALUES (35, 'April')")
+        self.change("INSERT INTO TagProperties VALUES (35, 'person', 'April')")
+        self.change(
+            "INSERT INTO ImageTagProperties VALUES (1, 35, 'tagRegion', '<rect x=\"4\"/>')")
+        before = self.people()
+        self.assertEqual(set(before), {"Gail", "April"})
+
+        self.change("UPDATE ImageTagProperties SET value = ? WHERE tagid = 35", '<rect x="9"/>')
+        self.assertEqual(
+            fingerprint.changed_people(before, self.people()), {"April"},
+            "only the person whose face moved")
+
+    def test_a_new_face_names_the_person_it_belongs_to(self):
+        before = self.people()
+        self.change(
+            "INSERT INTO ImageTagProperties VALUES (2, 34, 'tagRegion', '<rect x=\"9\"/>')")
+        self.assertEqual(fingerprint.changed_people(before, self.people()), {"Gail"})
+
+    def test_a_rename_is_two_people(self):
+        """The old name loses its faces and the new one gains them, which is
+        the only honest reading without tracking tag ids across a rename."""
+        before = self.people()
+        self.change("UPDATE Tags SET name = 'Abigail' WHERE id = 34")
+        self.assertEqual(
+            fingerprint.changed_people(before, self.people()), {"Gail", "Abigail"})
+
+    def test_a_face_on_a_tag_that_is_not_a_person_belongs_to_nobody(self):
+        """So the whole-library value moves and nobody is named, which is what
+        makes a sync look at everyone rather than guess."""
+        self.change("INSERT INTO Tags VALUES (90, 'Holiday')")
+        before = fingerprint.read_digikam(self.path)
+        self.change(
+            "INSERT INTO ImageTagProperties VALUES (3, 90, 'tagRegion', '<rect x=\"7\"/>')")
+        after = fingerprint.read_digikam(self.path)
+        self.assertNotEqual(after.value, before.value)
+        self.assertEqual(fingerprint.changed_people(before.people, after.people), set())
+
+    def test_a_change_of_case_alone_is_not_a_change(self):
+        self.assertEqual(
+            fingerprint.changed_people({"Gail": "aa"}, {"gail": "aa"}), set())
+
+    def test_the_name_returned_is_how_it_is_spelled_now(self):
+        self.assertEqual(
+            fingerprint.changed_people({"gail": "aa"}, {"Gail Vassallo": "bb"}),
+            {"Gail Vassallo", "gail"})
+
 
 class FakeApp:
-    def __init__(self, state, settings, memories=None):
+    def __init__(self, state, settings, memories=None, people=None):
         self.state = state
         self.settings = settings
         self._memories = memories
+        self._people = people or {}
         self.fingerprint_calls = 0
 
-    def memories_fingerprint(self):
+    def memories_changes(self):
         self.fingerprint_calls += 1
         if isinstance(self._memories, Exception):
             raise self._memories
-        return self._memories
+        if self._memories is None:
+            return None
+        return fingerprint.Fingerprint(value=self._memories, people=dict(self._people))
+
+    def memories_fingerprint(self):
+        seen = self.memories_changes()
+        return None if seen is None else seen.value
 
 
 class FakeSettings:
@@ -154,13 +213,13 @@ class WatcherTest(unittest.TestCase):
         self.state.close()
         self.tmp.cleanup()
 
-    def watcher(self, automation=None, memories=None, database=None):
+    def watcher(self, automation=None, memories=None, database=None, people=None):
         settings = FakeSettings(
             automation or {"enabled": True, "quiet_period_minutes": 10,
                            "check_interval_minutes": 5, "fallback_interval_hours": 24},
             database,
         )
-        self.app = FakeApp(self.state, settings, memories)
+        self.app = FakeApp(self.state, settings, memories, people)
         return TriggerWatcher(self.app)
 
     def test_automation_off_forgets_anything_pending(self):
@@ -246,6 +305,112 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(self.state.get_state("last_synced_digikam_fingerprint"), "dk1")
         self.assertEqual(self.state.get_state("last_synced_memories_fingerprint"), "nc1")
         self.assertIsNone(self.state.get_state("in_flight_fingerprints"))
+
+    # ------------------------------------------------- scoping to one person
+
+    def prime(self, *, digikam=("dk0", "dk1"), memories=("nc0", "nc1"),
+              digikam_people=None, memories_people=None):
+        """Put the watcher in the state a poll would have left it in."""
+        synced, seen = digikam
+        self.state.set_state("last_synced_digikam_fingerprint", synced)
+        self.state.set_state("last_seen_digikam_fingerprint", seen)
+        synced, seen = memories
+        self.state.set_state("last_synced_memories_fingerprint", synced)
+        self.state.set_state("last_seen_memories_fingerprint", seen)
+        before, after = digikam_people or ({}, {})
+        self.state.set_state("last_synced_digikam_people", before)
+        self.state.set_state("last_seen_digikam_people", after)
+        before, after = memories_people or ({}, {})
+        self.state.set_state("last_synced_memories_people", before)
+        self.state.set_state("last_seen_memories_people", after)
+
+    def test_one_person_changing_scopes_the_sync_to_them(self):
+        watcher = self.watcher()
+        self.prime(
+            memories=("nc0", "nc0"),
+            digikam_people=({"Gail": "a", "April": "b"}, {"Gail": "a", "April": "c"}),
+        )
+        self.assertEqual(watcher.changed_people(), {"April"})
+        self.assertEqual(watcher.scope_for("digikam_changed"), "April")
+
+    def test_two_people_changing_means_everyone(self):
+        watcher = self.watcher()
+        self.prime(
+            memories=("nc0", "nc0"),
+            digikam_people=({"Gail": "a", "April": "b"}, {"Gail": "z", "April": "c"}),
+        )
+        self.assertIsNone(watcher.scope_for("digikam_changed"))
+
+    def test_one_person_on_each_side_is_still_one_person(self):
+        watcher = self.watcher()
+        self.prime(
+            digikam_people=({"April": "b"}, {"April": "c"}),
+            memories_people=({"April": "x"}, {"April": "y"}),
+        )
+        self.assertEqual(watcher.scope_for("memories_changed"), "April")
+
+    def test_a_library_that_moved_but_names_nobody_means_everyone(self):
+        """An older companion app, or a digiKam change outside any face."""
+        watcher = self.watcher()
+        self.prime(memories=("nc0", "nc0"))
+        self.assertIsNone(watcher.changed_people())
+        self.assertIsNone(watcher.scope_for("digikam_changed"))
+
+    def test_the_fallback_sweep_is_never_scoped(self):
+        watcher = self.watcher()
+        self.prime(
+            memories=("nc0", "nc0"),
+            digikam_people=({"April": "b"}, {"April": "c"}),
+        )
+        self.assertIsNone(watcher.scope_for("interval"))
+
+    def test_a_scoped_run_settles_only_its_own_person(self):
+        watcher = self.watcher()
+        run_id = self.state.create_run("person", person="April")
+        self.state.set_state("last_synced_digikam_people", {"Gail": "a", "April": "b"})
+        self.state.set_state("last_synced_digikam_fingerprint", "dk0")
+        self.state.set_state("in_flight_fingerprints", {
+            "run_id": run_id, "digikam": "dk1", "memories": "nc1",
+            "digikam_people": {"Gail": "z", "April": "c"},
+            "memories_people": {"April": "y"},
+        })
+        self.state.finish_run(run_id, "applied", {})
+        self.assertTrue(watcher.promote_finished())
+
+        self.assertEqual(
+            self.state.get_state("last_synced_digikam_people"),
+            {"Gail": "a", "April": "c"},
+            "Gail changed during the run and has not been looked at")
+        self.assertEqual(
+            self.state.get_state("last_synced_digikam_fingerprint"), "dk0",
+            "the library as a whole is still out of step, so the next poll runs")
+        self.assertIsNone(
+            self.state.get_state("last_completed_at"),
+            "nothing has swept the whole library, so the fallback clock stands")
+
+    def test_a_person_with_no_faces_left_loses_their_entry(self):
+        watcher = self.watcher()
+        run_id = self.state.create_run("person", person="April")
+        self.state.set_state("last_synced_digikam_people", {"April": "b"})
+        self.state.set_state("in_flight_fingerprints", {
+            "run_id": run_id, "digikam": "dk1", "digikam_people": {}, "memories_people": {},
+        })
+        self.state.finish_run(run_id, "applied", {})
+        watcher.promote_finished()
+        self.assertEqual(self.state.get_state("last_synced_digikam_people"), {})
+
+    def test_a_full_run_settles_everyone(self):
+        watcher = self.watcher()
+        run_id = self.state.create_run("all")
+        self.state.set_state("in_flight_fingerprints", {
+            "run_id": run_id, "digikam": "dk1", "memories": "nc1",
+            "digikam_people": {"Gail": "z"}, "memories_people": {"Gail": "y"},
+        })
+        self.state.finish_run(run_id, "applied", {})
+        watcher.promote_finished()
+        self.assertEqual(self.state.get_state("last_synced_digikam_people"), {"Gail": "z"})
+        self.assertEqual(self.state.get_state("last_synced_memories_people"), {"Gail": "y"})
+        self.assertIsNotNone(self.state.get_state("last_completed_at"))
 
     def test_a_failed_run_does_not_claim_its_libraries_are_synced(self):
         watcher = self.watcher()

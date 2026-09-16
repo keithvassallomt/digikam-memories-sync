@@ -35,14 +35,16 @@ final class ChangeRepository {
 	 * A fingerprint of every detection that belongs to a named person.
 	 *
 	 * The hash covers which person each face is assigned to, so a new face, a
-	 * reassignment and a swap between two people all change it. Only two
-	 * integers are read per named face, which keeps it cheap enough to poll.
+	 * reassignment and a swap between two people all change it. A second hash
+	 * is kept per person, which is what lets Face Sync look at one person
+	 * rather than the whole library when only one of them moved. The same
+	 * scan produces both, so polling costs what it always did.
 	 *
-	 * @return array{count: int, checksum: string}
+	 * @return array{count: int, checksum: string, people: array<string, string>}
 	 */
 	public function detectionSummary(string $userId): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('d.id', 'd.cluster_id')
+		$qb->select('d.id', 'd.cluster_id', 'c.title')
 			->from(self::DETECTIONS_TABLE, 'd')
 			->innerJoin('d', self::CLUSTERS_TABLE, 'c', $qb->expr()->eq('d.cluster_id', 'c.id'))
 			->where($qb->expr()->eq('d.user_id', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)))
@@ -50,14 +52,30 @@ final class ChangeRepository {
 			->orderBy('d.id', 'ASC');
 		$result = $qb->executeQuery();
 		$hash = hash_init('sha256');
+		$perPerson = [];
 		$count = 0;
 		while (($row = $result->fetch()) !== false) {
 			$count++;
-			hash_update($hash, $row['id'] . ':' . $row['cluster_id'] . "\n");
+			$line = $row['id'] . ':' . $row['cluster_id'] . "\n";
+			hash_update($hash, $line);
+			$title = (string)$row['title'];
+			if (!isset($perPerson[$title])) {
+				$perPerson[$title] = hash_init('sha256');
+			}
+			hash_update($perPerson[$title], $line);
 		}
 		$result->closeCursor();
 
-		return ['count' => $count, 'checksum' => substr(hash_final($hash), 0, 32)];
+		$people = [];
+		foreach ($perPerson as $title => $context) {
+			$people[(string)$title] = substr(hash_final($context), 0, 32);
+		}
+
+		return [
+			'count' => $count,
+			'checksum' => substr(hash_final($hash), 0, 32),
+			'people' => $people,
+		];
 	}
 
 	/**
