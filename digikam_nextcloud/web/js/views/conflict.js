@@ -103,8 +103,18 @@ export function create({ go, refresh }) {
 
     const message = h('p', { class: 'message', role: 'status' });
     const applyAll = h('input', { type: 'checkbox' });
+    const always = h('input', {
+      type: 'checkbox',
+      // Always implies the rest of this sync, so the two cannot contradict.
+      onChange: (event) => {
+        if (!event.currentTarget.checked) return;
+        applyAll.checked = true;
+      },
+    });
 
-    const choose = (resolution) => resolve(conflict, resolution, applyAll.checked, message, [keep, take]);
+    const choose = (resolution) =>
+      resolve(conflict, resolution, applyAll.checked || always.checked,
+        always.checked, message, [keep, take]);
     const keep = h('button', {
       type: 'button', class: 'name-choice', 'aria-pressed': 'false', onClick: () => choose('digikam'),
     }, h('span', { 'aria-hidden': 'true' }, '▣'),
@@ -130,7 +140,12 @@ export function create({ go, refresh }) {
           h('label', { class: 'check' }, applyAll,
             h('span', {},
               h('strong', {}, 'Use this choice for the rest of this sync'),
-              h('small', {}, 'Every unresolved conflict in the same run gets the same choice.'))))),
+              h('small', {}, 'Every unresolved conflict in the same run gets the same choice.'))),
+          h('label', { class: 'check' }, always,
+            h('span', {},
+              h('strong', {}, 'Always use this library from now on'),
+              h('small', {}, 'Later syncs stop asking and rename the other library to match. '
+                + 'Change it again under Settings.'))))),
       message,
       h('div', { class: 'actions' },
         button('Back', { onClick: () => go('/attention') })));
@@ -170,12 +185,15 @@ export function create({ go, refresh }) {
     }
   }
 
-  async function resolve(conflict, resolution, applyToRemaining, message, buttons) {
+  async function resolve(conflict, resolution, applyToRemaining, always, message, buttons) {
     for (const element of buttons) element.disabled = true;
     buttons[resolution === 'digikam' ? 0 : 1].setAttribute('aria-pressed', 'true');
     message.textContent = 'Saving choice…';
     message.className = 'message';
     try {
+      if (always) {
+        await api.post('/api/settings/sync', { conflict_policy: resolution });
+      }
       await api.post(`/api/runs/${conflict.run_id}/conflicts/${conflict.id}`, {
         resolution, apply_to_remaining: applyToRemaining,
       });

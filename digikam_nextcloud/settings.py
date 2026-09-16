@@ -20,6 +20,13 @@ LOG = logging.getLogger(__name__)
 # so upgrading an existing installation never starts changing libraries by
 # itself.
 DEFAULTS: dict[str, Any] = {
+    "sync": {
+        # "ask", "digikam" or "memories". Asking is the default because
+        # trusting a library rewrites names in bulk with no review step.
+        "conflict_policy": "ask",
+        "create_in_memories": True,
+        "create_in_digikam": True,
+    },
     "automation": {
         "enabled": False,
         "apply_automatically": True,

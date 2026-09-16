@@ -71,6 +71,23 @@ Face Sync remembers the name both libraries last agreed on for each face, so a
 rename in either one is applied to the other rather than queued as a question.
 Only a face renamed on both sides, or one with no history, waits for you.
 
+## What a sync does
+
+Three settings shape every sync, manual or automatic.
+
+**When the two libraries disagree** decides what happens to the faces the
+ledger cannot settle. *Ask me* is the default and queues them for review.
+*Trust digiKam* and *Trust Memories* rename the other library to match without
+asking, which is worth having on a library with no history, where most
+disagreements are simply one side being right. The same choice is offered as
+"Always use this library from now on" while reviewing a conflict.
+
+**Create face boxes in Memories** and **Create face boxes in digiKam** each
+turn off the slow half of a first sync. With Memories off, a sync is names
+only: faces Recognize already found get their digiKam name, and no new boxes
+are drawn. Naming and box creation are separate questions, so turning one off
+changes nothing about the other or about disagreements.
+
 ## Commands
 
 ```bash

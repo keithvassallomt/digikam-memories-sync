@@ -12,6 +12,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Callable
 
+from .constants import CONFLICT_POLICIES
 from .digikam import DigikamDB
 from .digikam_writer import (
     DigikamWriter,
@@ -35,7 +36,7 @@ from .ledger import StateLedger
 from .models import SyncReport
 from .nextcloud_http import NextcloudConnectionError, NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
-from .settings import SettingsStore
+from .settings import DEFAULTS, SettingsStore
 from .state_store import StateStore
 from .sync import sync
 
@@ -361,6 +362,13 @@ class AppService:
         LOG.info("Automatic sync resumed")
         return {"paused": False, "paused_until": None}
 
+    def update_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._update_group("sync", payload, {
+            "conflict_policy": CONFLICT_POLICIES,
+            "create_in_memories": bool,
+            "create_in_digikam": bool,
+        })
+
     def update_automation(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._update_group("automation", payload, {
             "enabled": bool,
@@ -381,15 +389,23 @@ class AppService:
         })
 
     def _update_group(
-        self, group: str, payload: dict[str, Any], schema: dict[str, type]
+        self, group: str, payload: dict[str, Any], schema: dict[str, Any]
     ) -> dict[str, Any]:
-        """Accept only known keys, coerced to the type the group expects."""
+        """Accept only known keys, coerced to the type the group expects.
+
+        A key whose schema entry is a set of words takes one of those words.
+        """
         values: dict[str, Any] = {}
         for key, kind in schema.items():
             if key not in payload:
                 continue
             raw = payload[key]
-            if kind is bool:
+            if isinstance(kind, frozenset):
+                if raw not in kind:
+                    allowed = ", ".join(sorted(kind))
+                    raise ValueError(f"{key} must be one of: {allowed}.")
+                values[key] = raw
+            elif kind is bool:
                 if not isinstance(raw, bool):
                     raise ValueError(f"{key} must be true or false.")
                 values[key] = raw
@@ -1113,6 +1129,9 @@ class AppService:
         if not settings.get("digikam_db"):
             raise ValueError("Complete the connection setup first.")
         scope, person = self._preview_selection(payload)
+        # Read once, so a setting changed mid-run cannot make the two halves
+        # of one preview disagree about what they were asked to do.
+        sync_settings = dict(DEFAULTS["sync"], **(settings.get("sync") or {}))
 
         user_id = str(settings["nc_user"])
         password = self.settings.password(user_id)
@@ -1191,8 +1210,8 @@ class AppService:
                         ],
                         apply=False,
                         only_person=person or None,
-                        insert_missing=True,
-                        prefer_digikam_on_conflict=False,
+                        insert_missing=sync_settings["create_in_memories"],
+                        conflict_policy=sync_settings["conflict_policy"],
                         batch_size=250,
                         max_actions=250000,
                         session=None,
@@ -1215,6 +1234,8 @@ class AppService:
                     selected_faces,
                     report,
                     ledger=face_ledger,
+                    conflict_policy=sync_settings["conflict_policy"],
+                    create_in_digikam=sync_settings["create_in_digikam"],
                     batch_size=250,
                     max_actions=250000,
                     checkpoint=sink,

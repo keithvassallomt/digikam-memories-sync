@@ -168,6 +168,8 @@ class FaceSyncHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.server.app.notifications_delivered(payload))
             elif path == "/api/notifications/read":
                 self._json(HTTPStatus.OK, self.server.app.mark_notifications_read(payload))
+            elif path == "/api/settings/sync":
+                self._json(HTTPStatus.OK, self.server.app.update_sync(payload))
             elif path == "/api/settings/automation":
                 self._json(HTTPStatus.OK, self.server.app.update_automation(payload))
             elif path == "/api/settings/notifications":

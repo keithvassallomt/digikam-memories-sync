@@ -389,6 +389,30 @@ class ServiceLayerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.service.update_automation({})
 
+    def test_asking_about_disagreements_is_the_default(self) -> None:
+        self.assertEqual(self.settings.load()["sync"]["conflict_policy"], "ask")
+        self.assertTrue(self.settings.load()["sync"]["create_in_memories"])
+        self.assertTrue(self.settings.load()["sync"]["create_in_digikam"])
+
+    def test_a_library_can_be_trusted(self) -> None:
+        for policy in ("digikam", "memories", "ask"):
+            with self.subTest(policy=policy):
+                result = self.service.update_sync({"conflict_policy": policy})
+                self.assertEqual(result["sync"]["conflict_policy"], policy)
+
+    def test_only_the_three_choices_are_accepted(self) -> None:
+        with self.assertRaises(ValueError):
+            self.service.update_sync({"conflict_policy": "whichever"})
+        with self.assertRaises(ValueError):
+            self.service.update_sync({"conflict_policy": True})
+        self.assertEqual(self.settings.load()["sync"]["conflict_policy"], "ask")
+
+    def test_face_box_creation_can_be_turned_off_per_library(self) -> None:
+        result = self.service.update_sync({"create_in_memories": False})
+        self.assertFalse(result["sync"]["create_in_memories"])
+        # The other direction is a separate decision and is untouched.
+        self.assertTrue(result["sync"]["create_in_digikam"])
+
     def test_changing_one_group_leaves_the_libraries_alone(self) -> None:
         self.configure()
         self.service.update_notifications({"completed": True})

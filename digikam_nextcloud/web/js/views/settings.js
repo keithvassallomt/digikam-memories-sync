@@ -53,6 +53,14 @@ export function create({ go, refresh }) {
     return h('div', { class: 'row-tight' }, input, unit ? h('span', { class: 'muted' }, unit) : null);
   }
 
+  function wordChoice(options, value, onChange) {
+    return h('select', {
+      class: 'select',
+      onChange: (event) => onChange(event.currentTarget.value),
+    }, ...options.map(([word, label]) =>
+      h('option', { value: word, selected: value === word }, label)));
+  }
+
   function choice(options, value, onChange) {
     return h('select', {
       class: 'select',
@@ -71,6 +79,27 @@ export function create({ go, refresh }) {
         button('Change', { class: 'button button-small', onClick: () => go('/setup') })),
       settingRow('Photos folder in Nextcloud', settings.nc_photos_path || 'Photos',
         button('Change', { class: 'button button-small', onClick: () => go('/setup') })));
+  }
+
+  function syncCard(settings) {
+    const sync = settings.sync || {};
+    return card(
+      h('h3', {}, 'What a sync does'),
+      settingRow('When the two libraries disagree',
+        'Face Sync settles what it can from what both libraries last agreed on. '
+        + 'This is for the rest. Trusting one renames faces in the other without asking.',
+        wordChoice(
+          [['ask', 'Ask me'], ['digikam', 'Trust digiKam'], ['memories', 'Trust Memories']],
+          sync.conflict_policy || 'ask',
+          (conflict_policy) => send('/api/settings/sync', { conflict_policy }, 'Disagreements'))),
+      settingRow('Create face boxes in Memories',
+        'Off means names only: faces Memories already found get named, and none are added.',
+        toggle(sync.create_in_memories !== false, (create_in_memories) =>
+          send('/api/settings/sync', { create_in_memories }, 'Memories face boxes'))),
+      settingRow('Create face boxes in digiKam',
+        'Off means digiKam keeps the faces it already has.',
+        toggle(sync.create_in_digikam !== false, (create_in_digikam) =>
+          send('/api/settings/sync', { create_in_digikam }, 'digiKam face boxes'))));
   }
 
   function automationCard(settings) {
@@ -191,6 +220,7 @@ export function create({ go, refresh }) {
       ]);
       replace(body,
         librariesCard(settings),
+        syncCard(settings),
         automationCard(settings),
         notificationsCard(settings),
         serviceCard(service),

@@ -109,6 +109,55 @@ class ReversePreviewTests(unittest.TestCase):
         self.assertEqual(progress[-1]["current"], 2)
         self.assertEqual(progress[-1]["total"], 2)
 
+    def _one_disagreement_and_one_missing_face(self):
+        image = DigikamImage(
+            image_id=3,
+            name="photo.jpg",
+            relative_path="2026/photo.jpg",
+            full_path="/library/2026/photo.jpg",
+            width=1000,
+            height=800,
+            file_size=10,
+            unique_hash="",
+            faces=[
+                FaceRegion(
+                    person="Angie Galea",
+                    rect=Rect(0.1, 0.1, 0.2, 0.2),
+                    source="digikam",
+                    digikam_image_id=3,
+                    digikam_tag_id=8,
+                )
+            ],
+        )
+        remote = [
+            named_face(1, "Photos/2026/photo.jpg", "Gail Vassallo", Rect(0.1, 0.1, 0.2, 0.2)),
+            named_face(2, "Photos/2026/photo.jpg", "April Vassallo", Rect(0.6, 0.2, 0.2, 0.2)),
+        ]
+        return FakeDigikam([image]), selected_memories_faces(
+            remote, nextcloud_photos_path="Photos", only_person=None
+        )
+
+    def test_a_trusted_library_leaves_the_question_to_the_forward_pass(self):
+        """The forward pass sees the same pair and proposes the rename. This
+        pass recording a conflict too would ask a settled question."""
+        digikam, selected = self._one_disagreement_and_one_missing_face()
+        report = compare_memories_to_digikam(
+            digikam, selected, SyncReport(), conflict_policy="digikam",
+        )
+        self.assertEqual(report.conflicts, [])
+        self.assertEqual(report.created_in_digikam, 1)
+
+    def test_names_only_proposes_no_new_digikam_faces(self):
+        digikam, selected = self._one_disagreement_and_one_missing_face()
+        report = compare_memories_to_digikam(
+            digikam, selected, SyncReport(), create_in_digikam=False,
+        )
+        self.assertEqual(report.created_in_digikam, 0)
+        self.assertEqual([a.action for a in report.actions], [])
+        self.assertEqual(report.skipped, 1)
+        # The disagreement is a separate question and is still asked.
+        self.assertEqual(len(report.conflicts), 1)
+
     def test_person_selection_starts_from_memories(self):
         remote = [
             named_face(1, "Photos/one.jpg", "Gail Vassallo", Rect(0.1, 0.1, 0.2, 0.2)),

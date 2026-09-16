@@ -33,7 +33,7 @@ We need to start with a proper design document based on the above, including UI 
 
 Not part of phase 2. Recorded so the reasoning is not lost.
 
-## Trust one library
+## Trust one library — done
 
 I know my digiKam library is correct. So both manual and automatic syncs need
 an option to **trust digiKam** or **trust Memories**: instead of asking about
@@ -44,21 +44,23 @@ Three settings, then, rather than two: ask me, trust digiKam, trust Memories.
 "Ask me" stays the default, because the wrong choice here rewrites names in
 bulk.
 
-### What already exists
+### What was built
 
-The engine has `prefer_digikam_on_conflict`, which the command line uses and
-the interface hardcodes to `False`. Turning it on makes a digiKam name
-overwrite a disagreeing Memories name without asking, which is exactly "trust
-digiKam" for the forward direction.
+`sync.conflict_policy` in settings, offered under "What a sync does" and as
+"Always use this library from now on" next to a conflict you are already
+deciding. The engine takes a policy rather than the old
+`prefer_digikam_on_conflict` boolean, and the command line maps its existing
+config key onto it.
 
-So the work is mostly exposure rather than new engine code:
+A trusted library no longer raises the disagreement at all. It used to be
+recorded *and* overwritten, which would have filled Needs attention with
+questions the setting had already answered.
 
-- A settings value, and the same choice offered on the conflict review screen
-  as "always do this".
-- The reverse of it. There is no `prefer_memories_on_conflict`; the reverse
-  pass in `reverse.py` would need the matching branch, producing
-  `reassign_digikam` actions rather than conflicts.
-- Wiring it through `AppService.preview`, which currently passes `False`.
+Trusting Memories turned out not to need the reverse pass at all. The backlog
+assumed it would, but the forward pass gained a `reassign_digikam` branch when
+the ledger landed, so trusting Memories reuses it: the same rename the ledger
+would have proposed had it known which side moved. The reverse pass only had to
+stop asking, the way it already does for a pair the ledger has attributed.
 
 ### How it interacts with the ledger
 
@@ -69,11 +71,6 @@ and a face with no history at all.
 
 On a library with no history that is still most of them, which is exactly the
 situation that makes this worth having.
-
-### Why it is deferred
-
-It writes names in bulk with no review step, so it wants the ledger and the
-review screens proven first. Phase 2 gives both.
 
 ## Bulk retry for rejected faces — done
 
@@ -132,5 +129,9 @@ digiKam knows 133 people; Memories knows 12. A full sync would propose creating
 roughly 6,900 face boxes in Memories, which is the slow path and the one that
 produces rejections.
 
-Worth deciding separately whether creating boxes in Memories should be its own
-setting, so a first sync can be "names only" and leave box creation for later.
+Decided: creating boxes is its own setting, one per direction, under "What a
+sync does". Both are on, which is what every sync did before they existed.
+Turning off "Create face boxes in Memories" leaves a names-only sync: faces
+Recognize already found get their digiKam name, and the 6,900 slow inserts wait
+for a later decision. Naming and box creation are separate questions, so the
+disagreement above is still raised either way.
