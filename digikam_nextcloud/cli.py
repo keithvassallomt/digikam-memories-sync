@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from .constants import DEFAULT_SKIP_PERSONS
+from .constants import ASK, CONFLICT_POLICIES, DEFAULT_SKIP_PERSONS, TRUST_DIGIKAM
 from .digikam import DigikamDB
 from .logging_setup import setup_logging
 from .models import NextcloudBackend, SyncReport
@@ -451,9 +451,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     if "insert_missing" in cfg:
         insert_missing = bool(cfg["insert_missing"]) and not args.no_insert_missing
 
-    prefer_dk = not args.leave_conflicts
+    # The old boolean still reads as it always did. Trusting digiKam now means
+    # the disagreement is settled rather than reported and settled, so the
+    # conflicts section of a run that trusts one library is empty by design.
+    trusted = not args.leave_conflicts
     if "prefer_digikam_on_conflict" in cfg:
-        prefer_dk = bool(cfg["prefer_digikam_on_conflict"]) and not args.leave_conflicts
+        trusted = bool(cfg["prefer_digikam_on_conflict"]) and not args.leave_conflicts
+    conflict_policy = TRUST_DIGIKAM if trusted else ASK
+    if not args.leave_conflicts and str(cfg.get("conflict_policy", "")) in CONFLICT_POLICIES:
+        conflict_policy = str(cfg["conflict_policy"])
 
     if not digikam_db:
         print("error: --digikam-db or config digikam_db is required", file=sys.stderr)
@@ -531,7 +537,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             batch_size=batch_size,
             iou_threshold=iou,
             insert_missing=insert_missing,
-            prefer_digikam_on_conflict=prefer_dk,
+            conflict_policy=conflict_policy,
             limit_images=limit_images,
             nc_path_prefix=str(nc_path_prefix),
             path_maps=[[a, b] for a, b in path_maps],
@@ -589,7 +595,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 skip_persons=frozenset(skip),
                 only_person=only_person,
                 insert_missing=insert_missing,
-                prefer_digikam_on_conflict=prefer_dk,
+                conflict_policy=conflict_policy,
                 batch_size=batch_size,
                 limit_images=limit_images,
                 max_actions=max_actions,

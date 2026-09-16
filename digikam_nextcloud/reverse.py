@@ -6,7 +6,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from . import checkpoint as checkpoint_module
 from . import ledger as ledger_module
-from .constants import DEFAULT_SKIP_PERSONS
+from .constants import ASK, DEFAULT_SKIP_PERSONS
 from .digikam import DigikamDB
 from .matching import match_regions, overlapping_same_person
 from .models import (
@@ -67,6 +67,8 @@ def compare_memories_to_digikam(
     max_actions: int = 5000,
     max_conflicts: int = 5000,
     max_unmatched: int = 500,
+    conflict_policy: str = ASK,
+    create_in_digikam: bool = True,
     progress_callback: Optional[Callable[[dict[str, Any]], None]] = None,
     ledger: Optional[ledger_module.Ledger] = None,
     checkpoint: Optional[checkpoint_module.Checkpoint] = None,
@@ -78,7 +80,7 @@ def compare_memories_to_digikam(
     overlapping digiKam rectangle becomes a proposed ``create_digikam`` action.
     An overlapping rectangle with a different name is read against the ledger,
     exactly as the forward pass does, and only becomes a conflict when neither
-    side can be shown to have changed.
+    side can be shown to have changed and no library is trusted to win.
     """
     face_ledger = ledger if ledger is not None else ledger_module.NullLedger()
     progress = checkpoint if checkpoint is not None else checkpoint_module.NullCheckpoint()
@@ -142,6 +144,10 @@ def compare_memories_to_digikam(
                     # The forward pass owns this pair and has already proposed
                     # the change. Recording it twice would double-count it.
                     continue
+                if conflict_policy != ASK:
+                    # A trusted library settles this without being asked, and
+                    # the forward pass has already proposed what that means.
+                    continue
                 conflict = RegionConflict(
                     path=relative,
                     digikam_person=digikam_face.person,
@@ -189,6 +195,9 @@ def compare_memories_to_digikam(
                                 nc_file_name=memories_face.file_name,
                             )
                         )
+                    continue
+                if not create_in_digikam:
+                    report.skipped += 1
                     continue
                 report.created_in_digikam += 1
                 report.actions_total += 1

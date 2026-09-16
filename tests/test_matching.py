@@ -1,5 +1,6 @@
 import unittest
 
+from digikam_nextcloud.constants import ASK
 from digikam_nextcloud.models import (
     DigikamImage,
     FaceRegion,
@@ -61,7 +62,7 @@ class DuplicateFacePreviewTests(unittest.TestCase):
             report,
             apply=False,
             insert_missing=True,
-            prefer_digikam_on_conflict=False,
+            conflict_policy=ASK,
             iou_threshold=0.4,
             cluster_cache={},
             max_actions=10,

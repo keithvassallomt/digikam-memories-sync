@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from .constants import ASK, CONFLICT_POLICIES, TRUST_DIGIKAM
+
 LOG = logging.getLogger(__name__)
 
 # Default under the process cwd so sessions travel with the project checkout.
@@ -57,6 +59,16 @@ def _validate_session_id(session_id: str) -> str:
     return sid
 
 
+def _policy_of(data: dict[str, Any]) -> str:
+    """Read a conflict policy from a session file of either vintage."""
+    saved = str(data.get("conflict_policy") or "")
+    if saved in CONFLICT_POLICIES:
+        return saved
+    if "prefer_digikam_on_conflict" in data:
+        return TRUST_DIGIKAM if data["prefer_digikam_on_conflict"] else ASK
+    return ASK
+
+
 @dataclass
 class SessionParams:
     """Fingerprint of run parameters (warn on resume if they diverge)."""
@@ -68,7 +80,7 @@ class SessionParams:
     batch_size: int = 500
     iou_threshold: float = 0.4
     insert_missing: bool = True
-    prefer_digikam_on_conflict: bool = True
+    conflict_policy: str = ASK
     limit_images: Optional[int] = None
     nc_path_prefix: str = "files/"
     path_maps: list[list[str]] = field(default_factory=list)
@@ -93,9 +105,9 @@ class SessionParams:
             batch_size=int(data.get("batch_size") or 500),
             iou_threshold=float(data.get("iou_threshold") or 0.4),
             insert_missing=bool(data.get("insert_missing", True)),
-            prefer_digikam_on_conflict=bool(
-                data.get("prefer_digikam_on_conflict", True)
-            ),
+            # A session written before policies existed carries the old
+            # boolean, whose "true" meant trusting digiKam.
+            conflict_policy=_policy_of(data),
             limit_images=(
                 int(data["limit_images"])
                 if data.get("limit_images") is not None
@@ -116,11 +128,7 @@ class SessionParams:
             ("batch_size", self.batch_size, other.batch_size),
             ("iou_threshold", self.iou_threshold, other.iou_threshold),
             ("insert_missing", self.insert_missing, other.insert_missing),
-            (
-                "prefer_digikam_on_conflict",
-                self.prefer_digikam_on_conflict,
-                other.prefer_digikam_on_conflict,
-            ),
+            ("conflict_policy", self.conflict_policy, other.conflict_policy),
             ("limit_images", self.limit_images, other.limit_images),
             ("nc_path_prefix", self.nc_path_prefix, other.nc_path_prefix),
             ("path_maps", self.path_maps, other.path_maps),

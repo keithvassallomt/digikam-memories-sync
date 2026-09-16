@@ -7,6 +7,14 @@ DEFAULT_SKIP_PERSONS = frozenset(
     {"unknown", "unconfirmed", "ignored", "people"}
 )
 
+# What to do with a face whose two libraries disagree and whose history cannot
+# say which of them moved. Trusting one library writes names in bulk with no
+# review, so asking stays the default.
+ASK = "ask"
+TRUST_DIGIKAM = "digikam"
+TRUST_MEMORIES = "memories"
+CONFLICT_POLICIES = frozenset({ASK, TRUST_DIGIKAM, TRUST_MEMORIES})
+
 TAG_REGION_PROPERTY = "tagRegion"
 FACE_VECTOR_DIM = 128
 

@@ -55,7 +55,9 @@ skip_persons: []
 
 # Large libraries: assign names only (Recognize must already have face boxes)
 insert_missing: false
-prefer_digikam_on_conflict: true
+# What happens to a disagreement no history can settle: ask, digikam, memories.
+# The older prefer_digikam_on_conflict is still read, and true means digikam.
+conflict_policy: digikam
 
 # Scale (~500k faces): stream digiKam in batches; report detail is capped
 batch_size: 500

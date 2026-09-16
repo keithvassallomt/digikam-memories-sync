@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 
 from . import checkpoint as checkpoint_module
 from . import ledger as ledger_module
-from .constants import DEFAULT_SKIP_PERSONS
+from .constants import ASK, DEFAULT_SKIP_PERSONS, TRUST_DIGIKAM, TRUST_MEMORIES
 from .digikam import DigikamDB
 from .matching import match_files, match_regions, overlapping_same_person
 from .models import (
@@ -83,7 +83,7 @@ def _process_match(
     *,
     apply: bool,
     insert_missing: bool,
-    prefer_digikam_on_conflict: bool,
+    conflict_policy: str,
     iou_threshold: float,
     cluster_cache: dict[str, int],
     max_actions: int,
@@ -190,6 +190,40 @@ def _process_match(
                     f"digiKam renamed this face from {nf.person!r} "
                     f"to {dk_person!r} (IoU={iou:.2f})"
                 )
+            elif conflict_policy == TRUST_MEMORIES:
+                # The trusted library simply wins, so this is no longer a
+                # question. It becomes the same rename the ledger would have
+                # proposed had it known Memories was the side that moved.
+                report.reassigned_in_digikam += 1
+                _record_action(
+                    report,
+                    RegionAction(
+                        action="reassign_digikam",
+                        path=path,
+                        person=nf.person,
+                        old_person=dk_person,
+                        rect=df.rect.as_tuple(),
+                        detail=(
+                            f"trusting Memories: {dk_person!r} becomes "
+                            f"{nf.person!r} (IoU={iou:.2f})"
+                        ),
+                        nc_file_id=m.nextcloud.file_id,
+                        nc_detection_id=nf.nc_detection_id,
+                        nc_cluster_id=nf.nc_cluster_id,
+                        digikam_image_id=df.digikam_image_id,
+                        digikam_tag_id=df.digikam_tag_id,
+                        nc_dav_parent=nf.dav_parent,
+                        nc_file_name=nf.file_name,
+                    ),
+                    max_actions=max_actions,
+                )
+                continue
+            elif conflict_policy == TRUST_DIGIKAM:
+                old_person = nf.person
+                detail = (
+                    f"trusting digiKam: {dk_person!r} overwrites NC "
+                    f"{nf.person!r} (IoU={iou:.2f})"
+                )
             else:
                 # No history, or both sides moved. Only a person can settle it.
                 conflict = RegionConflict(
@@ -205,33 +239,27 @@ def _process_match(
                     digikam_tag_id=df.digikam_tag_id,
                 )
                 _record_conflict(report, conflict, max_conflicts=max_conflicts)
-                if not prefer_digikam_on_conflict:
-                    _record_action(
-                        report,
-                        RegionAction(
-                            action="conflict",
-                            path=path,
-                            person=dk_person,
-                            rect=df.rect.as_tuple(),
-                            detail=(
-                                f"conflict with NC person {nf.person!r} "
-                                f"(IoU={iou:.2f}); left unchanged"
-                            ),
-                            nc_file_id=m.nextcloud.file_id,
-                            nc_detection_id=nf.nc_detection_id,
-                            digikam_image_id=df.digikam_image_id,
-                            digikam_tag_id=df.digikam_tag_id,
-                            nc_dav_parent=nf.dav_parent,
-                            nc_file_name=nf.file_name,
+                _record_action(
+                    report,
+                    RegionAction(
+                        action="conflict",
+                        path=path,
+                        person=dk_person,
+                        rect=df.rect.as_tuple(),
+                        detail=(
+                            f"conflict with NC person {nf.person!r} "
+                            f"(IoU={iou:.2f}); left unchanged"
                         ),
-                        max_actions=max_actions,
-                    )
-                    continue
-                old_person = nf.person
-                detail = (
-                    f"CONFLICT resolved → digiKam person {dk_person!r} "
-                    f"overwrites NC {nf.person!r} (IoU={iou:.2f})"
+                        nc_file_id=m.nextcloud.file_id,
+                        nc_detection_id=nf.nc_detection_id,
+                        digikam_image_id=df.digikam_image_id,
+                        digikam_tag_id=df.digikam_tag_id,
+                        nc_dav_parent=nf.dav_parent,
+                        nc_file_name=nf.file_name,
+                    ),
+                    max_actions=max_actions,
                 )
+                continue
         else:
             detail = (
                 f"assign unclustered/empty NC detection to {dk_person!r} "
@@ -394,7 +422,7 @@ def sync(
     skip_persons: frozenset[str] = DEFAULT_SKIP_PERSONS,
     only_person: Optional[str] = None,
     insert_missing: bool = True,
-    prefer_digikam_on_conflict: bool = True,
+    conflict_policy: str = ASK,
     batch_size: int = 500,
     limit_images: Optional[int] = None,
     max_actions: int = DEFAULT_MAX_ACTIONS,
@@ -800,7 +828,7 @@ def sync(
                     report,
                     apply=apply,
                     insert_missing=insert_missing,
-                    prefer_digikam_on_conflict=prefer_digikam_on_conflict,
+                    conflict_policy=conflict_policy,
                     iou_threshold=iou_threshold,
                     cluster_cache=cluster_cache,
                     max_actions=max_actions,

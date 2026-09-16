@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from digikam_nextcloud import ledger as ledger_module
+from digikam_nextcloud.constants import ASK
 from digikam_nextcloud.apply import build_apply_plan, conflict_preview_actions
 from digikam_nextcloud.ledger import NullLedger, StateLedger
 from digikam_nextcloud.models import (
@@ -68,7 +69,7 @@ def run_match(digikam_faces, remote_faces, ledger=None):
         report,
         apply=False,
         insert_missing=True,
-        prefer_digikam_on_conflict=False,
+        conflict_policy=ASK,
         iou_threshold=0.4,
         cluster_cache={},
         max_actions=50,
