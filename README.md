@@ -45,9 +45,13 @@ The HTTP client checks the server during connection:
 ## Development
 
 ```bash
-python -m pip install -e .
+python -m pip install -e '.[desktop]'
 python -m unittest discover -s tests -v
 ```
+
+The `desktop` extra carries `psutil`, which is what lets macOS and Windows tell
+whether digiKam is open. Without it those platforms cannot tell, and an
+automatic run will not wait for digiKam. Linux reads `/proc` and needs nothing.
 
 ## Automatic operation
 
@@ -121,8 +125,9 @@ falls back to its daily check.
 
 The interface implements first-run setup, All/One-person selection, a read-only
 two-way preview, conflict decisions and an explicit Apply step. Close digiKam
-before applying local changes; the UI checks this on Linux and always requires
-confirmation. If digiKam remains open without a visible window, the Apply page
+before applying local changes; the UI checks this and always requires
+confirmation. The check reads `/proc` on Linux and uses `psutil` elsewhere, so
+macOS and Windows need the `desktop` extra to notice an open digiKam at all. If digiKam remains open without a visible window, the Apply page
 can ask it to close and waits until it releases the database. Preview runs,
 notifications, conflict decisions, operation
 results and face links are persisted in the application state database.

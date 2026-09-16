@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .coordinator import Coordinator
+from .digikam_writer import digikam_probe_supported
 from .local_server import create_server
 from .logging_setup import setup_service_logging
 from .settings import SettingsStore
@@ -219,6 +220,11 @@ def run_service(
             },
         )
         LOG.info("Face Sync service listening on %s", service_url({"port": server.server_port}))
+        if not digikam_probe_supported():
+            LOG.warning(
+                "This machine cannot tell whether digiKam is open, so runs will "
+                "not wait for it. Install the desktop extra (psutil) to fix that."
+            )
 
         def stop(signum: int, _frame: Any) -> None:
             LOG.info("Stopping on signal %s", signum)

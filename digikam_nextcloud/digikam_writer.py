@@ -10,6 +10,11 @@ import signal
 from pathlib import Path
 from typing import Any
 
+try:  # The desktop extra. Linux can manage without it; nothing else can.
+    import psutil
+except ImportError:  # pragma: no cover - exercised by the no-psutil platforms
+    psutil = None  # type: ignore[assignment]
+
 from .geometry import displayed_dimensions, parse_tag_region
 from .models import Rect
 from .names import person_names_match, sanitize_person_name
@@ -20,10 +25,11 @@ class DigikamChangedError(RuntimeError):
     """The database no longer matches the preview that the user approved."""
 
 
-def digikam_process_ids() -> list[int]:
-    """Return matching digiKam process IDs without external dependencies."""
-    if not sys.platform.startswith("linux"):
-        return []
+DIGIKAM_PROCESS_NAMES = frozenset({"digikam", "digikam.exe"})
+
+
+def _process_ids_from_proc() -> list[int]:
+    """Read /proc directly, so Linux needs no dependency at all."""
     proc = Path("/proc")
     try:
         entries = proc.iterdir()
@@ -40,26 +46,79 @@ def digikam_process_ids() -> list[int]:
             ).lower()
         except (OSError, IndexError):
             continue
-        if command == "digikam" or executable == "digikam":
+        if command in DIGIKAM_PROCESS_NAMES or executable in DIGIKAM_PROCESS_NAMES:
             matches.append(int(entry.name))
     return sorted(matches)
 
 
+def _process_ids_from_psutil() -> list[int]:
+    """The same question asked through psutil, which answers it anywhere."""
+    if psutil is None:
+        return []
+    matches: list[int] = []
+    for process in psutil.process_iter(["pid", "name"]):
+        try:
+            name = (process.info.get("name") or "").lower()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if name in DIGIKAM_PROCESS_NAMES:
+            matches.append(int(process.info["pid"]))
+    return sorted(matches)
+
+
+def digikam_probe_supported() -> bool:
+    """Whether this machine can answer "is digiKam open?" at all.
+
+    A machine that cannot must not be told digiKam is closed, because the
+    deferral gate would then never fire and writes would land under a running
+    digiKam.
+    """
+    return psutil is not None or sys.platform.startswith("linux")
+
+
+def digikam_process_ids() -> list[int]:
+    """Return matching digiKam process IDs.
+
+    Linux keeps the dependency-free /proc scan. Everywhere else needs psutil,
+    and so does a Linux box whose /proc is unreadable.
+    """
+    if sys.platform.startswith("linux"):
+        found = _process_ids_from_proc()
+        if found:
+            return found
+    return _process_ids_from_psutil()
+
+
 def digikam_is_running() -> bool:
-    """Best-effort dependency-free process check on Linux."""
+    """Best-effort process check. False also means "could not tell"."""
     return bool(digikam_process_ids())
+
+
+def _request_exit(process_id: int) -> None:
+    """Ask one process to quit, without escalating to a forced kill."""
+    if sys.platform == "win32":
+        if psutil is None:  # pragma: no cover - guarded by the caller
+            raise RuntimeError("Closing digiKam needs psutil on this platform.")
+        try:
+            psutil.Process(process_id).terminate()
+        except psutil.NoSuchProcess as error:
+            raise ProcessLookupError(str(error)) from error
+        except psutil.AccessDenied as error:
+            raise PermissionError(str(error)) from error
+        return
+    os.kill(process_id, signal.SIGTERM)
 
 
 def terminate_digikam(timeout: float = 6.0) -> dict[str, Any]:
     """Ask digiKam to terminate, without escalating to a forced kill."""
-    if not sys.platform.startswith("linux"):
+    if not digikam_probe_supported():
         return {"supported": False, "closed": False, "remaining": []}
     process_ids = digikam_process_ids()
     if not process_ids:
         return {"supported": True, "closed": True, "remaining": []}
     for process_id in process_ids:
         try:
-            os.kill(process_id, signal.SIGTERM)
+            _request_exit(process_id)
         except ProcessLookupError:
             continue
         except PermissionError as error:

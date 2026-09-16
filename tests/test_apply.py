@@ -11,6 +11,8 @@ from digikam_nextcloud.app_service import AppService, is_systemic_apply_failure
 from digikam_nextcloud.digikam_writer import (
     DigikamWriter,
     create_sqlite_backup,
+    digikam_probe_supported,
+    digikam_process_ids,
     terminate_digikam,
 )
 from digikam_nextcloud.models import FaceRegion, NextcloudFile, NextcloudRequirements, Rect
@@ -461,3 +463,90 @@ class ApplyServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakePsutil:
+    """Just enough psutil for the process probe."""
+
+    class NoSuchProcess(Exception):
+        pass
+
+    class AccessDenied(Exception):
+        pass
+
+    class _Found:
+        def __init__(self, info):
+            self.info = info
+
+    def __init__(self, names_by_pid):
+        self.names_by_pid = names_by_pid
+        self.terminated = []
+
+    def process_iter(self, _attrs=None):
+        return [self._Found({"pid": pid, "name": name}) for pid, name in self.names_by_pid.items()]
+
+    def Process(self, pid):  # noqa: N802 - mirrors the psutil name
+        outer = self
+
+        class Handle:
+            def terminate(self):
+                outer.terminated.append(pid)
+
+        return Handle()
+
+
+class DigikamProbeTests(unittest.TestCase):
+    def test_psutil_finds_digikam_where_there_is_no_proc(self):
+        fake = FakePsutil({11: "Finder", 22: "digiKam"})
+        with (
+            patch("digikam_nextcloud.digikam_writer.sys.platform", "darwin"),
+            patch("digikam_nextcloud.digikam_writer.psutil", fake),
+        ):
+            self.assertTrue(digikam_probe_supported())
+            self.assertEqual(digikam_process_ids(), [22])
+
+    def test_windows_executable_name_matches(self):
+        fake = FakePsutil({7: "explorer.exe", 8: "digikam.exe"})
+        with (
+            patch("digikam_nextcloud.digikam_writer.sys.platform", "win32"),
+            patch("digikam_nextcloud.digikam_writer.psutil", fake),
+        ):
+            self.assertEqual(digikam_process_ids(), [8])
+
+    def test_windows_close_goes_through_psutil(self):
+        fake = FakePsutil({8: "digikam.exe"})
+        with (
+            patch("digikam_nextcloud.digikam_writer.sys.platform", "win32"),
+            patch("digikam_nextcloud.digikam_writer.psutil", fake),
+            patch(
+                "digikam_nextcloud.digikam_writer.digikam_process_ids",
+                side_effect=[[8], []],
+            ),
+            patch("digikam_nextcloud.digikam_writer.time.sleep"),
+        ):
+            result = terminate_digikam()
+        self.assertTrue(result["closed"])
+        self.assertEqual(fake.terminated, [8])
+
+    def test_linux_still_reads_proc_without_psutil(self):
+        with (
+            patch("digikam_nextcloud.digikam_writer.psutil", None),
+            patch(
+                "digikam_nextcloud.digikam_writer._process_ids_from_proc",
+                return_value=[5],
+            ),
+        ):
+            self.assertTrue(digikam_probe_supported())
+            self.assertEqual(digikam_process_ids(), [5])
+
+    def test_probe_reports_itself_unavailable_rather_than_answering_no(self):
+        with (
+            patch("digikam_nextcloud.digikam_writer.sys.platform", "darwin"),
+            patch("digikam_nextcloud.digikam_writer.psutil", None),
+        ):
+            self.assertFalse(digikam_probe_supported())
+            self.assertEqual(digikam_process_ids(), [])
+            self.assertEqual(
+                terminate_digikam(),
+                {"supported": False, "closed": False, "remaining": []},
+            )

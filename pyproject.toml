@@ -20,7 +20,7 @@ database = [
 ]
 desktop = [
   "keyring>=25",
-  "watchdog>=6",
+  "psutil>=5.9",
 ]
 
 [project.scripts]
