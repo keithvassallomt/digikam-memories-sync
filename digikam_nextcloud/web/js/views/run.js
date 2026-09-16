@@ -13,7 +13,7 @@ const RESULT_ROWS = [
   ['inserted', 'Create face boxes in Memories'],
   ['created_in_digikam', 'Create face boxes in digiKam'],
   ['reassigned_in_digikam', 'Rename faces in digiKam'],
-  ['ignored', 'Kept in one library'],
+  ['ignored', 'Skipped, kept in one library before'],
 ];
 
 export function create({ go, refresh }) {
@@ -200,7 +200,7 @@ export function create({ go, refresh }) {
         ? `${plural(failed, 'change', 'changes')} could not be applied`
         : `${plural(applyState.applied || 0, 'change', 'changes')} applied`),
       applyState.ignored
-        ? h('p', { class: 'muted' }, `${plural(applyState.ignored, 'face', 'faces')} kept in one library.`)
+        ? h('p', { class: 'muted' }, `${plural(applyState.ignored, 'face', 'faces')} you kept in one library.`)
         : null,
       applyState.backup_path
         ? h('p', { class: 'backup-path' }, `Backup: ${applyState.backup_path}`)
