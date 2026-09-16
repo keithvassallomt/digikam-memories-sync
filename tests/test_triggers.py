@@ -412,6 +412,121 @@ class WatcherTest(unittest.TestCase):
         self.assertEqual(self.state.get_state("last_synced_memories_people"), {"Gail": "y"})
         self.assertIsNotNone(self.state.get_state("last_completed_at"))
 
+    # ------------------------------------------- a run judged against itself
+
+    def applied_run(self, mode="all", person="", wrote=("April",)):
+        """A settled run that wrote to some people in Memories."""
+        run_id = self.state.create_run(mode, person=person)
+        self.state.finish_run(run_id, "previewed", {})
+        self.state.initialize_apply(run_id, [
+            {
+                "target": "memories", "operation": "insert_memories",
+                "action": "insert", "path": f"{name}.jpg", "person": name,
+                "rect": [0.1, 0.1, 0.05, 0.08],
+            }
+            for name in wrote
+        ])
+        for item in self.state.pending_apply_actions(run_id):
+            self.state.finish_apply_action(item["id"], "applied", result={"changed": True})
+        self.state.finish_run(run_id, "applied", {})
+        return run_id
+
+    def test_a_runs_own_writes_do_not_chase_it_with_another_run(self):
+        """An apply moves the fingerprint the run is about to be judged
+        against, which used to start a second sync over the first one's work."""
+        watcher = self.watcher(memories="nc_after", people={"April": "after"})
+        run_id = self.applied_run()
+        self.state.set_state("in_flight_fingerprints", {
+            "run_id": run_id, "memories": "nc_before",
+            "memories_people": {"April": "before"}, "digikam_people": {},
+        })
+        self.assertTrue(watcher.promote_finished())
+        self.assertEqual(
+            self.state.get_state("last_synced_memories_people"), {"April": "after"})
+        self.assertIsNone(watcher.poll(NOW), "the run's own writes are not a change")
+
+    def test_a_change_made_while_the_run_worked_is_still_noticed(self):
+        """The property the old bookkeeping existed to protect. It has to
+        survive the fix, or an edit during a long sync is lost."""
+        watcher = self.watcher(
+            memories="nc_after", people={"April": "after", "Gail": "moved"})
+        run_id = self.applied_run()
+        self.state.set_state("last_synced_memories_people",
+                             {"April": "before", "Gail": "was"})
+        self.state.set_state("last_synced_memories_fingerprint", "nc_before")
+        self.state.set_state("in_flight_fingerprints", {
+            "run_id": run_id, "memories": "nc_before",
+            "memories_people": {"April": "before", "Gail": "was"},
+            "digikam_people": {},
+        })
+        watcher.promote_finished()
+        self.assertEqual(
+            self.state.get_state("last_synced_memories_people")["Gail"], "was",
+            "Gail moved while the run worked and was nothing to do with it")
+        self.assertNotEqual(
+            self.state.get_state("last_synced_memories_fingerprint"), "nc_after",
+            "so the library still reads as changed")
+
+        watcher.poll(NOW)
+        self.assertEqual(watcher.changed_people(), {"Gail"})
+        self.assertEqual(watcher.scope_for("memories_changed"), "Gail")
+
+    def test_a_scoped_run_that_leaves_nothing_over_brings_the_library_into_step(self):
+        """Otherwise the whole-library value stays stale for ever: every poll
+        reads the library as changed, nobody is named, and a full run is asked
+        for after every scoped one."""
+        watcher = self.watcher(memories="nc_after", people={"April": "after"})
+        run_id = self.applied_run(mode="person", person="April")
+        self.state.set_state("last_synced_memories_people", {"April": "before"})
+        self.state.set_state("last_synced_memories_fingerprint", "nc_before")
+        self.state.set_state("in_flight_fingerprints", {
+            "run_id": run_id, "memories": "nc_before",
+            "memories_people": {"April": "before"}, "digikam_people": {},
+        })
+        watcher.promote_finished()
+        self.assertEqual(
+            self.state.get_state("last_synced_memories_fingerprint"), "nc_after")
+        self.assertIsNone(watcher.poll(NOW), "nothing is left to sync")
+
+    def test_a_scoped_run_still_claims_only_its_own_person(self):
+        watcher = self.watcher(
+            memories="nc_after", people={"April": "after", "Gail": "moved"})
+        run_id = self.applied_run(mode="person", person="April")
+        self.state.set_state("last_synced_memories_people",
+                             {"April": "before", "Gail": "was"})
+        self.state.set_state("in_flight_fingerprints", {
+            "run_id": run_id, "memories": "nc_before",
+            "memories_people": {"April": "before", "Gail": "was"},
+            "digikam_people": {},
+        })
+        watcher.promote_finished()
+        self.assertEqual(
+            self.state.get_state("last_synced_memories_people"),
+            {"April": "after", "Gail": "was"})
+
+    def test_what_a_run_wrote_is_read_from_its_journal(self):
+        run_id = self.state.create_run("all")
+        self.state.finish_run(run_id, "previewed", {})
+        self.state.initialize_apply(run_id, [
+            {"target": "memories", "operation": "insert_memories", "action": "insert",
+             "path": "a.jpg", "person": "April", "rect": [0.1, 0.1, 0.05, 0.08]},
+            {"target": "digikam", "operation": "reassign_digikam",
+             "action": "reassign_digikam", "path": "b.jpg", "person": "Gail",
+             "old_person": "Abigail", "rect": [0.1, 0.1, 0.05, 0.08]},
+            {"target": "memories", "operation": "insert_memories", "action": "insert",
+             "path": "c.jpg", "person": "Never", "rect": [0.1, 0.1, 0.05, 0.08]},
+        ])
+        pending = self.state.pending_apply_actions(run_id)
+        for item in pending[:2]:
+            self.state.finish_apply_action(item["id"], "applied", result={"changed": True})
+        self.state.finish_apply_action(pending[2]["id"], "failed", error="nope")
+
+        written = self.state.people_written_by(run_id)
+        self.assertEqual(written["memories"], {"April"})
+        self.assertEqual(
+            written["digikam"], {"Gail", "Abigail"},
+            "a rename moves a face out of one person's set and into another's")
+
     def test_a_failed_run_does_not_claim_its_libraries_are_synced(self):
         watcher = self.watcher()
         run_id = self.state.create_run("all")

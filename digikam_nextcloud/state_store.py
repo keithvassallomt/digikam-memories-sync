@@ -1218,6 +1218,35 @@ class StateStore:
             self.conn.commit()
         return removed
 
+    def people_written_by(self, run_id: int) -> dict[str, set[str]]:
+        """Which people this run changed, in which library.
+
+        A run's own writes move the fingerprint it is about to be judged
+        against, so whatever promotes that fingerprint has to know which
+        changes the run caused itself. ``old_person`` counts as well: a rename
+        takes a face out of one person's set and puts it in another's.
+        """
+        written: dict[str, set[str]] = {"digikam": set(), "memories": set()}
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT target, action_json FROM run_actions
+                   WHERE run_id = ? AND status = 'applied'""",
+                (run_id,),
+            ).fetchall()
+        for row in rows:
+            target = str(row["target"])
+            if target not in written:
+                continue
+            try:
+                action = json.loads(row["action_json"])
+            except (TypeError, ValueError):
+                continue
+            for key in ("person", "old_person"):
+                name = str(action.get(key) or "").strip()
+                if name:
+                    written[target].add(name)
+        return written
+
     def plan_conflicts(self, run_id: int) -> dict[str, Any]:
         """The decisions that belong in this run's plan, and only those.
 

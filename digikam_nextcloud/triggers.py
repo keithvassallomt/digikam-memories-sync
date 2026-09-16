@@ -277,81 +277,134 @@ class TriggerWatcher:
 
     # --------------------------------------------------- fingerprint bookkeeping
 
-    def stash_for_run(self, run_id: int) -> None:
-        """Remember both fingerprints as they were when this run started.
-
-        Promoting these on completion, rather than measuring again afterwards,
-        means a change made during the run is still noticed next time.
-        """
-        database = self.app.settings.load().get("digikam_db")
+    def _read_both(self) -> dict[str, Any]:
+        """Measure both libraries. None for one that could not be read."""
         from . import fingerprint as fingerprint_module
 
+        database = self.app.settings.load().get("digikam_db")
         digikam = None
-        digikam_people: dict[str, str] = {}
         if database:
             try:
-                seen = fingerprint_module.read_digikam(database)
-                digikam, digikam_people = seen.value, dict(seen.people)
+                digikam = fingerprint_module.read_digikam(database)
             except Exception:
                 digikam = None
         memories = None
-        memories_people: dict[str, str] = {}
         try:
-            seen = self.app.memories_changes()
-            if seen is not None:
-                memories, memories_people = seen.value, dict(seen.people)
+            memories = self.app.memories_changes()
         except Exception:
             memories = None
+        return {"digikam": digikam, "memories": memories}
+
+    def stash_for_run(self, run_id: int) -> None:
+        """Remember both libraries as they were when this run started.
+
+        This is what the run looked at, so it is the most it can claim to have
+        synced. What it claims is worked out against a second reading once it
+        finishes, in ``promote_finished``.
+        """
+        seen = self._read_both()
+        digikam, memories = seen["digikam"], seen["memories"]
         self.state.set_state(
             IN_FLIGHT,
             {
                 "run_id": int(run_id),
-                "digikam": digikam,
-                "memories": memories,
-                "digikam_people": digikam_people,
-                "memories_people": memories_people,
+                "digikam": digikam.value if digikam else None,
+                "memories": memories.value if memories else None,
+                "digikam_people": dict(digikam.people) if digikam else {},
+                "memories_people": dict(memories.people) if memories else {},
             },
         )
 
-    def _promote_person(self, key: str, stashed: Any, person: str) -> None:
-        """Bring one person's entry into step, leaving everyone else alone."""
-        current = self.state.get_state(key)
-        merged = dict(current) if isinstance(current, dict) else {}
-        source = stashed if isinstance(stashed, dict) else {}
-        wanted = person.strip().lower()
-        for name in [name for name in merged if str(name).strip().lower() == wanted]:
-            merged.pop(name)
-        for name, digest in source.items():
-            if str(name).strip().lower() == wanted:
-                merged[str(name)] = str(digest)
-        self.state.set_state(key, merged)
+    @staticmethod
+    def _keyed(mapping: Any) -> dict[str, tuple[str, str]]:
+        """Index a per-person map by a name that survives a change of case."""
+        indexed: dict[str, tuple[str, str]] = {}
+        if isinstance(mapping, dict):
+            for name, digest in mapping.items():
+                indexed[str(name).strip().lower()] = (str(name), str(digest))
+        return indexed
+
+    def _settle_side(
+        self,
+        value_key: str,
+        people_key: str,
+        stashed_value: Any,
+        stashed_people: Any,
+        post: Any,
+        written: set[str],
+        scope: set[str] | None,
+    ) -> None:
+        """Record what this run leaves behind as synced, for one library.
+
+        A person is claimed when the run looked at them and either nothing
+        moved while it ran, or the run moved it itself. Anything else is left
+        exactly as it was, so the next poll still sees it and names them.
+
+        When nothing is left over, the whole-library value moves too. That is
+        what stops a sync from being chased by another one over its own
+        writes, and what lets a person-scoped run finish the job rather than
+        leaving the library permanently out of step with itself.
+        """
+        synced = self._keyed(self.state.get_state(people_key))
+        before = self._keyed(stashed_people)
+        after = self._keyed(post.people) if post is not None else before
+        written_keys = {name.strip().lower() for name in written}
+        scope_keys = None if scope is None else {name.strip().lower() for name in scope}
+
+        result: dict[str, str] = {}
+        outstanding = False
+        for key in set(synced) | set(before) | set(after):
+            was, now = before.get(key), after.get(key)
+            looked = scope_keys is None or key in scope_keys
+            moved_while_running = (was[1] if was else None) != (now[1] if now else None)
+            if looked and (key in written_keys or not moved_while_running):
+                # Claimed. A person missing from the new reading has no faces
+                # left, so they lose their entry rather than keeping a stale one.
+                if now is not None:
+                    result[now[0]] = now[1]
+                continue
+            keep = synced.get(key)
+            if keep is not None:
+                result[keep[0]] = keep[1]
+            if (keep[1] if keep else None) != (now[1] if now else None):
+                outstanding = True
+
+        self.state.set_state(people_key, result)
+        # A library that could not be read again can still claim what the run
+        # looked at, which is what this did before it measured twice.
+        value = stashed_value if post is None else post.value
+        if value and not outstanding:
+            self.state.set_state(value_key, value)
+        # Otherwise the value stays as it was, so the next poll still reads the
+        # library as changed and works out who from the per-person entries.
 
     def promote_finished(self) -> bool:
-        """Once a run settles, treat what it saw as the synced state."""
+        """Once a run settles, treat what it accounted for as synced."""
         stashed = self.state.get_state(IN_FLIGHT)
         if not isinstance(stashed, dict):
             return False
-        run = self.state.run(int(stashed.get("run_id") or 0))
+        run_id = int(stashed.get("run_id") or 0)
+        run = self.state.run(run_id)
         if run is None or str(run.get("status")) not in SETTLED_STATUSES:
             return False
         person = str(run.get("person") or "") if str(run.get("mode")) == "person" else ""
-        if person:
-            # A scoped run only learned about one person. Promoting the
-            # whole-library values would mark everyone else's changes as
-            # synced, so they stay as they were and the next poll picks up the
-            # next person. The fallback clock is left alone for the same
-            # reason: nothing has swept the whole library yet.
-            self._promote_person(DIGIKAM_PEOPLE, stashed.get("digikam_people"), person)
-            self._promote_person(MEMORIES_PEOPLE, stashed.get("memories_people"), person)
-            self.state.clear_state(IN_FLIGHT)
-            return True
-        if stashed.get("digikam"):
-            self.state.set_state(DIGIKAM_FINGERPRINT, stashed["digikam"])
-        if stashed.get("memories"):
-            self.state.set_state(MEMORIES_FINGERPRINT, stashed["memories"])
-        self.state.set_state(DIGIKAM_PEOPLE, dict(stashed.get("digikam_people") or {}))
-        self.state.set_state(MEMORIES_PEOPLE, dict(stashed.get("memories_people") or {}))
-        self.state.set_state(LAST_COMPLETED_AT, _now().isoformat())
+        scope = {person} if person else None
+        written = self.state.people_written_by(run_id)
+        post = self._read_both()
+        self._settle_side(
+            DIGIKAM_FINGERPRINT, DIGIKAM_PEOPLE,
+            stashed.get("digikam"), stashed.get("digikam_people"),
+            post["digikam"], written.get("digikam", set()), scope,
+        )
+        self._settle_side(
+            MEMORIES_FINGERPRINT, MEMORIES_PEOPLE,
+            stashed.get("memories"), stashed.get("memories_people"),
+            post["memories"], written.get("memories", set()), scope,
+        )
+        if not person:
+            # Only a run that looked at the whole library resets the clock that
+            # forces one.
+            self.state.set_state(LAST_COMPLETED_AT, _now().isoformat())
         self.state.clear_state(IN_FLIGHT)
         return True
 

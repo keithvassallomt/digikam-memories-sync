@@ -49,11 +49,38 @@ a person, a rename, which reads as two people rather than one. And the daily
 fallback sweep is never scoped, because it exists to catch what the
 fingerprints missed.
 
-The bookkeeping is the subtle half. A scoped run only learned about its own
-person, so it promotes that person's hash and leaves the whole-library values
-and the fallback clock alone. The library still reads as out of step, the next
-poll picks up the next person, and a queue of changed people drains one run at
-a time rather than one run covering work it never looked at.
+The bookkeeping is the subtle half, and the first live test found two faults in
+it. Both came from the same place: a run is judged against a fingerprint that
+its own apply has already moved.
+
+**A sync used to be chased by another one over its own writes.** The promotion
+recorded the libraries as they were when the run *started*, deliberately, so an
+edit made during a long run was still noticed afterwards. But the run's own
+writes move the same fingerprint, so every apply left the library reading as
+changed and triggered a follow-up. Worse for the optimisation than for
+correctness: the follow-up was attributed to every person the apply had touched,
+so it was never scoped. Measured on the real thing, a 17-change sync wrote to
+six people in Memories and one in digiKam, and the follow-up was a full
+three-minute sweep that found one thing.
+
+**And every scoped run asked for a full one afterwards.** A scoped run left the
+whole-library value alone, on the grounds that it had only looked at one
+person. But that value is what says "something changed", so it stayed stale for
+ever: the next poll read the library as changed, found nobody to name, and fell
+back to looking at everyone. The optimisation paid for itself once and then
+handed the cost straight back.
+
+Both are fixed by measuring a second time when the run settles, and comparing.
+A person is claimed when the run looked at them and either nothing moved while
+it ran or the run moved it itself — which it knows from its own journal,
+including the `old_person` a rename moves a face away from. Anyone else keeps
+the entry they had, so they are still noticed and still named. When nothing is
+left over, the whole-library value moves too, which is what stops both cycles.
+The fallback clock still only resets for a run that looked at everything.
+
+What this gives up: a change made during a run, to a person that same run wrote
+to, is folded into what the run claims to have synced. The window is one run
+long and one person wide, and the daily sweep catches it.
 
 ## Cross-platform process detection — done
 
