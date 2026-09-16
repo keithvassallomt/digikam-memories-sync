@@ -86,6 +86,7 @@ class FakeApplyBackend:
         self.faces = list(faces or [])
         self.closed = False
         self.last_insert = None
+        self.last_insert_score = None
 
     def connection_requirements(self):
         return NextcloudRequirements(True, True, "https://install.test")
@@ -493,6 +494,63 @@ class FakePsutil:
                 outer.terminated.append(pid)
 
         return Handle()
+
+
+class ConfirmedByDefaultTests(unittest.TestCase):
+    """Every box digiKam drew is offered to Recognize as the detection."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.database = Path(self.temp.name) / "digikam4.db"
+        make_writable_digikam(self.database)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def insert(self, backend, **extra):
+        with DigikamWriter(self.database) as writer:
+            executor = ApplyExecutor(
+                backend=backend, digikam=writer, nextcloud_photos_path="Photos"
+            )
+            return executor.execute({
+                "target": "memories", "operation": "insert_memories",
+                "path": "2026/photo.jpg", "person": "April Vassallo",
+                "rect": [0.6, 0.2, 0.2, 0.2], "nc_file_id": 7,
+                **extra,
+            })
+
+    def test_an_ordinary_insert_now_offers_the_box_as_the_detection(self):
+        backend = FakeApplyBackend()
+        backend.supports_confirmed_insert = True
+        self.insert(backend)
+        self.assertTrue(backend.last_insert["confirmed"])
+
+    def test_an_older_companion_app_still_gets_a_plain_insert(self):
+        """Asking a server that cannot do it is an error, so an unreviewed
+        face quietly settles for the detector rather than failing the run."""
+        backend = FakeApplyBackend()
+        backend.supports_confirmed_insert = False
+        self.insert(backend)
+        self.assertFalse(backend.last_insert["confirmed"])
+
+    def test_a_reviewed_face_still_insists(self):
+        """Falling back would put it through the detector that rejected it."""
+        backend = FakeApplyBackend()
+        backend.supports_confirmed_insert = False
+        self.insert(backend, confirmed_face=True)
+        self.assertTrue(backend.last_insert["confirmed"])
+
+    def test_the_descriptor_confidence_is_kept_with_the_result(self):
+        backend = FakeApplyBackend()
+        backend.supports_confirmed_insert = True
+        backend.last_insert_score = 0.0
+        result = self.insert(backend)
+        self.assertEqual(result["score"], 0.0)
+
+    def test_a_backend_that_reports_no_score_records_none(self):
+        backend = FakeApplyBackend()
+        result = self.insert(backend)
+        self.assertNotIn("score", result)
 
 
 class DigikamProbeTests(unittest.TestCase):

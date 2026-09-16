@@ -268,6 +268,35 @@ class FaceImportHTTPTests(unittest.TestCase):
                 person="Gail Vassallo",
             )
 
+    def test_the_response_score_says_which_descriptor_path_was_taken(self):
+        backend = self.make_backend()
+        backend._request = lambda *args, **kwargs: (
+            201, {}, json.dumps({"detection": {"id": 987}, "score": 0.0}).encode(),
+        )
+        backend.insert_detection(
+            file_id=123, rect=Rect(0.1, 0.2, 0.3, 0.4), cluster_id=456,
+            person="Gail Vassallo",
+        )
+        # Zero is the confirmed-region path: no detector, the box as given.
+        self.assertEqual(backend.last_insert_score, 0.0)
+
+    def test_a_score_does_not_survive_into_the_next_insert(self):
+        backend = self.make_backend()
+        backend._request = lambda *args, **kwargs: (
+            201, {}, json.dumps({"detection": {"id": 987}, "score": 0.91}).encode(),
+        )
+        backend.insert_detection(
+            file_id=123, rect=Rect(0.1, 0.2, 0.3, 0.4), cluster_id=456, person="A",
+        )
+        self.assertEqual(backend.last_insert_score, 0.91)
+        backend._request = lambda *args, **kwargs: (
+            201, {}, json.dumps({"detection": {"id": 988}}).encode(),
+        )
+        backend.insert_detection(
+            file_id=124, rect=Rect(0.1, 0.2, 0.3, 0.4), cluster_id=456, person="B",
+        )
+        self.assertIsNone(backend.last_insert_score)
+
     def test_confirmed_insert_marks_a_user_reviewed_face(self):
         backend = self.make_backend()
         backend.supports_confirmed_insert = True

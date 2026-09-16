@@ -112,10 +112,29 @@ overwhelming majority, and the faces clear. That is 271 individual clicks to
 reach a conclusion that was the same every time, which is the argument for the
 bulk action.
 
-It also strengthens the case for making `confirmed` the default on every
-insert, rather than only on a retry. The counter-argument stands: it hands
-Recognize descriptors from boxes its own detector rejected, which may weaken
-its clustering. Worth measuring before changing the default.
+### Confirmed is now the default — decided
+
+Every insert offers digiKam's box as the detection, not just a retry. Recognize
+detects first regardless, so this changes nothing about the faces it finds; it
+only decides what happens to the ones it finds nothing in. On this library that
+was 264 faces whose boxes a review found correct nearly every time, so the
+alternative was a guaranteed round of clicks for a known answer.
+
+The counter-argument was accepted rather than answered: it hands Recognize
+descriptors from boxes its own detector rejected, and those descriptors join
+clusters and pull their centroids, which can merge two people. Nobody reviews
+them now.
+
+So the effect is at least recorded. The companion app returns the descriptor
+confidence and Face Sync kept throwing it away; an insert result now carries
+`score`, where zero means the box was taken as given. Comparing those faces
+against their own cluster's other members is what would show the damage, if
+there is any.
+
+A server too old for confirmed inserts refuses them outright, so an unreviewed
+face settles for the detector rather than failing the run. A reviewed one still
+insists, because falling back would only put it through the detector that
+rejected it in the first place.
 
 ## Related: the Memories side is much sparser than digiKam
 

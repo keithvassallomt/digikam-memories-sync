@@ -247,12 +247,20 @@ class ApplyExecutor:
         if self.backend is None:
             raise RuntimeError("The Nextcloud connection is unavailable.")
         cluster = self.backend.get_or_create_cluster(person)
+        # Every box digiKam drew is offered as the detection. Recognize's own
+        # detector still gets first refusal, so this only changes what happens
+        # to the faces it finds nothing in, which are the small ones in group
+        # shots that a review said were right anyway.
+        reviewed = action.get("confirmed_face") is True
+        confirmed = reviewed or bool(
+            getattr(self.backend, "supports_confirmed_insert", False)
+        )
         detection_id = self.backend.insert_detection(
             file_id=nc_file.file_id,
             rect=wanted,
             cluster_id=cluster,
             person=person,
-            confirmed=action.get("confirmed_face") is True,
+            confirmed=confirmed,
         )
         faces.append(
             FaceRegion(
@@ -266,7 +274,17 @@ class ApplyExecutor:
                 file_name=nc_file.name,
             )
         )
-        return {"changed": True, "nc_file_id": nc_file.file_id, "nc_detection_id": detection_id}
+        result = {
+            "changed": True,
+            "nc_file_id": nc_file.file_id,
+            "nc_detection_id": detection_id,
+        }
+        score = getattr(self.backend, "last_insert_score", None)
+        if score is not None:
+            # Kept so the cost of confirming by default stays answerable from
+            # the journal: a zero here is a descriptor taken from the box.
+            result["score"] = score
+        return result
 
     def execute(self, action: dict[str, Any]) -> dict[str, Any]:
         operation = action["operation"]

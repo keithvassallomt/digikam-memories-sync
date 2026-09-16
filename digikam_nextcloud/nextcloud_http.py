@@ -204,6 +204,10 @@ class NextcloudHTTP:
     supports_export = False
     supports_assign = False
     supports_confirmed_insert = False
+    # The descriptor confidence of the insert just made. 0.0 means the box was
+    # taken as given rather than found by the detector, which is the one thing
+    # that says which of the two descriptor paths a face went through.
+    last_insert_score: Optional[float] = None
     generates_face_vectors = False
 
     def __init__(
@@ -1496,6 +1500,7 @@ class NextcloudHTTP:
         person = sanitize_person_name(person or "")
         if not person:
             raise ValueError("person name empty after sanitization")
+        self.last_insert_score = None
         if confirmed and not self.supports_confirmed_insert:
             raise RuntimeError(
                 "Update the Nextcloud Face Sync companion app before adding a reviewed face."
@@ -1541,6 +1546,9 @@ class NextcloudHTTP:
         detection_id = detection.get("id") if isinstance(detection, dict) else None
         if detection_id is None:
             raise RuntimeError("Recognize face-import response has no detection id")
+        score = payload.get("score")
+        if isinstance(score, (int, float)) and not isinstance(score, bool):
+            self.last_insert_score = float(score)
         return int(detection_id)
 
     def sample_cluster_vector(self, cluster_id: int) -> Optional[list[float]]:
