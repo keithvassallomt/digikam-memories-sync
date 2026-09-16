@@ -150,6 +150,79 @@ class FailureReviewTest(unittest.TestCase):
         self.assertEqual(counts["pending"], 1)
 
 
+class ReviewMarkerTest(unittest.TestCase):
+    """The marker that explains an edited action outlives the apply."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "state.sqlite3"
+        self.state = StateStore(self.path)
+        self.run_id = self.state.create_run("all")
+        self.plan = [{
+            "target": "memories", "operation": "insert_memories", "action": "insert",
+            "path": "0.jpg", "person": "Person", "rect": [0.1, 0.1, 0.05, 0.08],
+        }]
+        self.state.finish_run(self.run_id, "previewed", {"inserted": 1})
+        self.state.initialize_apply(self.run_id, self.plan)
+
+    def tearDown(self):
+        self.state.close()
+        self.tmp.cleanup()
+
+    def marker(self, action_id):
+        with self.state.lock:
+            row = self.state.conn.execute(
+                "SELECT review, result_json FROM run_actions WHERE id = ?", (action_id,)
+            ).fetchone()
+        return row["review"], row["result_json"]
+
+    def test_a_retry_records_the_marker_outside_the_result(self):
+        item = self.state.pending_apply_actions(self.run_id)[0]
+        self.state.finish_apply_action(item["id"], "failed", error=REJECTED)
+        self.state.finish_apply(self.run_id, "apply_failed")
+        self.state.resolve_failed_action(
+            self.run_id, self.state.failed_apply_actions(self.run_id)[0]["id"],
+            "retry", rect=[0.5, 0.5, 0.2, 0.2],
+        )
+        review, result = self.marker(item["id"])
+        self.assertEqual(review, "adjusted")
+        self.assertIsNone(result, "the failed attempt is no longer the record")
+
+    def test_applying_the_retry_does_not_erase_why_it_differs(self):
+        item = self.state.pending_apply_actions(self.run_id)[0]
+        self.state.finish_apply_action(item["id"], "failed", error=REJECTED)
+        self.state.finish_apply(self.run_id, "apply_failed")
+        self.state.resolve_failed_action(
+            self.run_id, self.state.failed_apply_actions(self.run_id)[0]["id"],
+            "retry", rect=[0.5, 0.5, 0.2, 0.2],
+        )
+        self.state.finish_apply_action(item["id"], "applied", result={"changed": True})
+        review, _ = self.marker(item["id"])
+        self.assertEqual(review, "adjusted", "the apply result is not the same field")
+
+    def test_a_marker_written_the_old_way_moves_across_on_upgrade(self):
+        item = self.state.pending_apply_actions(self.run_id)[0]
+        with self.state.lock:
+            self.state.conn.execute(
+                """UPDATE run_actions SET review = NULL,
+                   result_json = '{"review":"adjusted"}' WHERE id = ?""",
+                (item["id"],),
+            )
+            self.state.conn.execute("ALTER TABLE run_actions DROP COLUMN review")
+            self.state.conn.commit()
+        self.state.close()
+
+        reopened = StateStore(self.path)
+        try:
+            row = reopened.conn.execute(
+                "SELECT review FROM run_actions WHERE id = ?", (item["id"],)
+            ).fetchone()
+            self.assertEqual(row["review"], "adjusted")
+        finally:
+            reopened.close()
+            self.state = StateStore(self.path)
+
+
 class PartlyAppliedHomeTest(unittest.TestCase):
     """A run holding reviewed faces must not vanish from the home screen."""
 

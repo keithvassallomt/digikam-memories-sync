@@ -149,6 +149,13 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "channel": "TEXT",
         "delivered_at": "TEXT",
     },
+    "run_actions": {
+        # How this action came to differ from the preview it was built from.
+        # It lives here rather than in result_json because an apply overwrites
+        # that with its own outcome, which used to lose the explanation and
+        # make the next apply refuse the whole plan.
+        "review": "TEXT",
+    },
     "face_links": {
         # The one name both libraries last agreed on for this face.
         "synced_name": "TEXT",
@@ -215,6 +222,14 @@ class StateStore:
                 """UPDATE conflicts SET decided_run_id = run_id
                    WHERE status = 'resolved'
                      AND resolution IN ('digikam', 'memories')"""
+            )
+        if ("run_actions", "review") in added:
+            # The marker used to be written into result_json, where it
+            # survived only until the action was applied. Whatever is left
+            # moves across; the rest is settled work the plan check skips.
+            self.conn.execute(
+                """UPDATE run_actions SET review = json_extract(result_json, '$.review')
+                   WHERE json_extract(result_json, '$.review') IS NOT NULL"""
             )
         if ("face_links", "synced_name") in added:
             # Links written by an applied change already record one agreed
@@ -544,7 +559,7 @@ class StateStore:
                 raise ValueError("The saved Apply plan does not match this preview.")
             if existing:
                 saved = self.conn.execute(
-                    """SELECT id,status,action_json,result_json FROM run_actions
+                    """SELECT id,status,review,action_json FROM run_actions
                        WHERE run_id = ? ORDER BY position""",
                     (run_id,),
                 ).fetchall()
@@ -552,16 +567,16 @@ class StateStore:
                 confirmed_upgrades: list[tuple[str, int]] = []
                 for row, original in zip(saved, plan, strict=True):
                     if row["status"] != "pending":
-                        # Settled work, which this apply will not touch. A
-                        # reviewed face that has since been applied has had its
-                        # review marker overwritten by its apply result, so
-                        # checking it here would reject a plan for being
-                        # different in exactly the way it was asked to be.
+                        # Settled work, which this apply will not touch, so the
+                        # rebuilt plan has nothing to say about it. The review
+                        # marker outlasts an apply now, so this is no longer
+                        # the only thing standing between a finished reviewed
+                        # face and a refused plan; it is the reason there was
+                        # never anything to check.
                         continue
                     current = json.loads(row["action_json"])
                     if current == original:
                         continue
-                    result = json.loads(row["result_json"] or "{}")
                     source_rect_name = (
                         "digikam_rect"
                         if current.get("operation") == "insert_memories"
@@ -575,7 +590,7 @@ class StateStore:
                     }
                     original_without_rect = {k: v for k, v in original.items() if k != "rect"}
                     if not (
-                        result.get("review") == "adjusted"
+                        row["review"] == "adjusted"
                         and source_rect == original.get("rect")
                         and current_without_rect == original_without_rect
                     ):
@@ -876,7 +891,7 @@ class StateStore:
         action["rect"] = rect
         self.conn.execute(
             """UPDATE run_actions SET status = 'pending', action_json = ?,
-               result_json = '{"review":"adjusted"}', error = NULL
+               review = 'adjusted', result_json = NULL, error = NULL
                WHERE id = ?""",
             (json.dumps(action), action_id),
         )
