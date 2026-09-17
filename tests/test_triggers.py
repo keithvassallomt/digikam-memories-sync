@@ -278,7 +278,7 @@ class WatcherTest(unittest.TestCase):
         watcher = self.watcher(database="/photos/digikam4.db")
         self.state.set_state("last_digikam_mtime", 1234.0)
         with patch("digikam_nextcloud.fingerprint.source_mtime", return_value=1234.0), \
-             patch("digikam_nextcloud.fingerprint.digikam_fingerprint") as hashed:
+             patch("digikam_nextcloud.fingerprint.read_digikam") as hashed:
             watcher.poll(NOW)
             hashed.assert_not_called()
 
