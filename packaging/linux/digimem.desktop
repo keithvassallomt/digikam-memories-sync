@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DigiMem
+GenericName=Photo face synchronisation
+Comment=Keep digiKam and Nextcloud Memories faces in sync
+Exec=digimem ui
+Icon=digimem
+Terminal=false
+Categories=Graphics;Photography;
+Keywords=digikam;nextcloud;memories;faces;
+StartupNotify=false

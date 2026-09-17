@@ -1,0 +1,64 @@
+# Both the .deb and the .rpm are built from this one file.
+#
+# Neither bundles a Python. DigiMem is pure Python, so depending on the
+# distribution's own interpreter keeps the package architecture-independent —
+# one .deb and one .rpm cover x86_64 and arm64 alike — and sidesteps the glibc
+# floor that a frozen build would impose. The AppImage is where a bundled
+# interpreter belongs.
+name: digimem
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: graphics
+priority: optional
+maintainer: Keith Vassallo <keith@vassallo.cloud>
+vendor: Keith Vassallo
+homepage: https://github.com/keithvassallomt/digikam-memories-sync
+license: Beerware
+description: |
+  Two-way face synchronisation between digiKam and Nextcloud Memories.
+  .
+  DigiMem reconciles face names and rectangles between a local digiKam library
+  and Nextcloud Memories/Recognize, in both directions. It previews and applies
+  changes with photo-based conflict review, backs up the digiKam database
+  before local writes, and records each operation so an interrupted apply can
+  resume without repeating completed work.
+
+contents:
+  - src: ./build/pkgroot/usr/lib/digimem
+    dst: /usr/lib/digimem
+  - src: ./packaging/linux/digimem
+    dst: /usr/bin/digimem
+    file_info:
+      mode: 0755
+  - src: ./packaging/linux/digimem.desktop
+    dst: /usr/share/applications/digimem.desktop
+  - src: ./digimem/icons/digimem.png
+    dst: /usr/share/icons/hicolor/256x256/apps/digimem.png
+  - src: ./LICENSE
+    dst: /usr/share/doc/digimem/LICENSE
+  - src: ./CHANGELOG.md
+    dst: /usr/share/doc/digimem/CHANGELOG.md
+
+overrides:
+  deb:
+    depends:
+      - python3 (>= 3.10)
+      - python3-yaml
+      - python3-psutil
+      - python3-keyring
+    recommends:
+      - python3-pymysql
+      - python3-psycopg2
+      - openssh-client
+  rpm:
+    depends:
+      - python3 >= 3.10
+      - python3-pyyaml
+      - python3-psutil
+      - python3-keyring
+    recommends:
+      - python3-PyMySQL
+      - python3-psycopg2
+      - openssh-clients

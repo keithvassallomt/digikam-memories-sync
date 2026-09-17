@@ -1,0 +1,10 @@
+#!/bin/sh
+# DigiMem is installed outside the interpreter's own site-packages, so that one
+# architecture-independent package works on every distribution whatever its
+# Python happens to be called. This wrapper is what puts it back on the path.
+#
+# It is also what autostart entries and menu shortcuts point at, rather than
+# the interpreter, because PYTHONPATH set here is not set at login.
+PYTHONPATH="/usr/lib/digimem${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+exec python3 -m digimem "$@"

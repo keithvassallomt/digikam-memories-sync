@@ -1,0 +1,5 @@
+#!/bin/sh
+# AppImages are mounted at a different path every run, so everything has to be
+# found relative to this script rather than assumed.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/digimem/digimem" "$@"

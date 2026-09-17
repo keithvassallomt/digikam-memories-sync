@@ -1,0 +1,317 @@
+# Everything a release is made of, built from the tag `just release` pushes.
+#
+# Nothing here is built on a developer machine. The .deb and .rpm carry no
+# Python and so do not care where they were built; everything else freezes an
+# interpreter and very much does, which is why the AppImage is built in an old
+# glibc container rather than on the runner's own libraries.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (no leading v), for a dry run"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Not secrets: both are readable in any signed binary, and are already public
+  # in keithvassallomt/icloudbridge. Only the certificate and the notarisation
+  # credentials need hiding.
+  MACOS_SIGN_IDENTITY: "Developer ID Application: Keith Vassallo (W4SF9AYV8T)"
+  APPLE_TEAM_ID: "W4SF9AYV8T"
+
+jobs:
+  version:
+    name: Work out the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      nextcloud: ${{ steps.pick.outputs.nextcloud }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          nc=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('nextcloud-app/digikam_face_sync/appinfo/info.xml').getroot().findtext('version'))")
+          echo "nextcloud=$nc" >> "$GITHUB_OUTPUT"
+          echo "DigiMem $version, Nextcloud app $nc" >> "$GITHUB_STEP_SUMMARY"
+
+      # A tag that disagrees with the source is worth stopping for: it is the
+      # one mistake that cannot be fixed after the release is published.
+      - name: Check the tag matches the source
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          source=$(python3 -c 'import re,pathlib; print(re.search(r"__version__ = \"(.*)\"", pathlib.Path("digimem/__init__.py").read_text())[1])')
+          tag="${GITHUB_REF_NAME#v}"
+          [[ "$source" == "$tag" ]] || { echo "Tag $tag but source says $source"; exit 1; }
+          python3 scripts/changelog.py check "$tag"
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: python -m pip install -e '.[desktop,database]'
+      - run: python -m unittest discover -s tests
+
+  linux-packages:
+    name: deb and rpm
+    needs: [version, tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No interpreter goes in these: they depend on the distribution's own,
+      # which is what keeps one package working on every architecture.
+      - name: Stage the package tree
+        run: |
+          set -euo pipefail
+          mkdir -p build/pkgroot/usr/lib/digimem
+          cp -r digimem build/pkgroot/usr/lib/digimem/digimem
+          find build/pkgroot -name '__pycache__' -type d -prune -exec rm -rf {} +
+          find build/pkgroot -name '*.py[co]' -delete
+
+      - name: Install nfpm
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.41.3/nfpm_2.41.3_amd64.deb -o /tmp/nfpm.deb
+          sudo dpkg -i /tmp/nfpm.deb
+
+      - name: Build
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          nfpm pkg -f packaging/nfpm.yaml -p deb -t dist/
+          nfpm pkg -f packaging/nfpm.yaml -p rpm -t dist/
+          ls -la dist/
+
+      # A package that installs but cannot start is worse than a build failure,
+      # because it fails on the user's machine instead of here.
+      - name: Install the deb and run it
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ./dist/*.deb
+          digimem --help
+          python3 -c "import sys; sys.path.insert(0, '/usr/lib/digimem'); import digimem; print('installed version', digimem.__version__)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/*
+
+  appimage:
+    name: AppImage
+    needs: [version, tests]
+    runs-on: ubuntu-latest
+    # glibc 2.28, so the result runs on anything from about Debian 10 onwards.
+    # Building on the runner's own glibc would produce something that runs only
+    # on distributions newer than the runner.
+    container: quay.io/pypa/manylinux_2_28_x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the frozen tree
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          export PATH=/opt/python/cp312-cp312/bin:$PATH
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install '.[desktop,database]'
+          pyinstaller --noconfirm --clean packaging/pyinstaller/digimem.spec
+
+      - name: Assemble the AppDir
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/bin
+          cp -r dist/digimem AppDir/usr/bin/digimem
+          cp packaging/appimage/AppRun AppDir/AppRun
+          chmod +x AppDir/AppRun
+          cp packaging/appimage/digimem.desktop AppDir/digimem.desktop
+          cp digimem/icons/digimem.png AppDir/digimem.png
+
+      - name: Build the AppImage
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          # There is no FUSE in a container, so appimagetool unpacks itself.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          mkdir -p out
+          ARCH=x86_64 /tmp/appimagetool AppDir "out/DigiMem-${VERSION}-x86_64.AppImage"
+          ls -la out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: out/*.AppImage
+
+  windows:
+    name: Windows installer
+    needs: [version, tests]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+
+      - name: Build the frozen tree
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install ".[desktop,database]"
+          pyinstaller --noconfirm --clean packaging/pyinstaller/digimem.spec
+
+      # Deliberately unsigned. SmartScreen will warn until it has seen enough
+      # downloads; the release notes say so rather than pretending otherwise.
+      - name: Build the installer
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          choco install innosetup --no-progress -y
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VERSION packaging\windows\digimem.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*Setup.exe
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    needs: [version, tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-13
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      # Step-level `if` cannot see `secrets`, so the question is answered once
+      # here, where it can.
+      HAS_SIGNING: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+
+      - name: Build the app bundle
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip pyinstaller
+          python -m pip install '.[desktop,database]'
+          pyinstaller --noconfirm --clean packaging/pyinstaller/digimem.spec
+
+      # The certificate goes into a throwaway keychain, so nothing is left
+      # behind on a runner that other jobs share.
+      - name: Import the signing certificate
+        if: env.HAS_SIGNING == 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain=$RUNNER_TEMP/build.keychain
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$password" "$keychain" >/dev/null
+          security list-keychain -d user -s "$keychain" login.keychain
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: Sign, notarise and build the DMG
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          SIGN_IDENTITY: ${{ env.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          packaging/macos/package.sh dist/DigiMem.app "$VERSION" out
+          mv "out/DigiMem-${VERSION}.dmg" "out/DigiMem-${VERSION}-${{ matrix.arch }}.dmg"
+          ls -la out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: out/*.dmg
+
+  nextcloud:
+    name: Nextcloud app
+    needs: [version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./build-nextcloud-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nextcloud-app
+          path: dist/digikam_face_sync-*.tar.gz
+
+  release:
+    name: Publish the release
+    needs: [version, linux-packages, appimage, windows, macos, nextcloud]
+    runs-on: ubuntu-latest
+    # Only a tag publishes. A workflow_dispatch run builds and notarises
+    # everything and stops there, so the whole pipeline can be rehearsed
+    # without creating a release that has to be deleted afterwards.
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Render the release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_notes.py "$VERSION" -o "$RUNNER_TEMP/notes.md"
+          ls -la artifacts/
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" \
+            --title "DigiMem v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            artifacts/*

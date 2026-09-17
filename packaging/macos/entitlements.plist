@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Deliberately close to empty.
+       DigiMem has no Qt and no JavaScript engine, which is what forces the
+       allow-jit and allow-unsigned-executable-memory entitlements on most
+       frozen Python applications. It is an HTTP server and a browser tab.
+
+       Every dylib in the bundle is signed with the same Team ID, so library
+       validation is satisfied and must not be switched off. If a future
+       dependency ships a binary that cannot be re-signed, this is the escape
+       hatch — but reach for it only then, and knowing what it gives up:
+
+       <key>com.apple.security.cs.disable-library-validation</key><true/>
+  -->
+</dict>
+</plist>
