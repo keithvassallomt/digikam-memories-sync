@@ -11,8 +11,10 @@ mkdir -p "$output_dir"
 tar --create --gzip --file "$archive" \
 	--directory="$(dirname "$app_root")" \
 	--exclude="$app_id/.git" \
+	--exclude="$app_id/.gitignore" \
 	--exclude="$app_id/vendor" \
 	--exclude="$app_id/dist" \
+	--exclude="$app_id/build-release.sh" \
 	"$app_id"
 
 echo "$archive"
