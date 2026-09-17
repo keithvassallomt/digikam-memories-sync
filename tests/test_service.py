@@ -318,6 +318,74 @@ class ShortcutTest(unittest.TestCase):
             shortcuts.remove()
             self.assertFalse(shortcuts.status()["installed"])
 
+    def test_every_platform_ships_the_icon_it_needs(self) -> None:
+        for suffix in (".png", ".ico", ".icns"):
+            with self.subTest(suffix=suffix):
+                icon = shortcuts.icon_path(suffix)
+                self.assertTrue(icon.is_file(), f"{icon} is not packaged")
+                self.assertGreater(icon.stat().st_size, 0)
+
+    def test_the_desktop_entry_points_at_a_real_icon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"XDG_DATA_HOME": tmp}
+        ), patch("sys.platform", "linux"), patch("digimem.shortcuts.subprocess.run"):
+            body = Path(shortcuts.install(None)["path"]).read_text()
+        line = next(l for l in body.splitlines() if l.startswith("Icon="))
+        self.assertTrue(
+            Path(line.removeprefix("Icon=")).is_file(),
+            "an absolute Icon= that does not exist shows as a blank entry")
+
+    def test_the_macos_bundle_carries_its_icon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "DigiMem.app"
+            shortcuts._install_macos(None, bundle)
+            plist = (bundle / "Contents" / "Info.plist").read_text()
+            self.assertIn("<key>CFBundleIconFile</key>", plist)
+            self.assertIn("<string>digimem</string>", plist)
+            self.assertTrue(
+                (bundle / "Contents" / "Resources" / "digimem.icns").is_file(),
+                "the plist names an icon, so the icon has to be in there")
+
+    def test_the_windows_shortcut_is_a_lnk_that_carries_an_icon(self) -> None:
+        """A .cmd cannot have an icon. A .lnk can, and PowerShell makes one
+        without adding a dependency, since Windows already needs it."""
+        target = Path("C:/Start Menu/DigiMem.lnk")
+        script = shortcuts.shortcut_script(target, None)
+        self.assertIn("CreateShortcut('C:/Start Menu/DigiMem.lnk')", script)
+        self.assertIn("$s.IconLocation = '", script)
+        self.assertIn("digimem.ico", script)
+        self.assertIn('"-m" "digimem" "ui"', script)
+        self.assertIn("$s.Save()", script)
+
+    def test_a_windows_path_with_a_quote_cannot_break_out_of_the_script(self) -> None:
+        script = shortcuts.shortcut_script(Path("C:/it's here/DigiMem.lnk"), None)
+        self.assertIn("'C:/it''s here/DigiMem.lnk'", script)
+
+    def test_windows_falls_back_to_a_cmd_with_no_powershell(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "digimem.shortcuts.shutil.which", return_value=None
+        ):
+            written = shortcuts._install_windows(None, Path(tmp) / "DigiMem.lnk")
+            self.assertEqual(written.suffix, ".cmd")
+            self.assertIn('"-m" "digimem" "ui"', written.read_text())
+
+    def test_installing_one_windows_shape_clears_the_other(self) -> None:
+        """Two menu entries for one application is worse than none."""
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "sys.platform", "win32"
+        ), patch.dict("os.environ", {"APPDATA": tmp}), patch(
+            "digimem.shortcuts.shutil.which", return_value=None
+        ):
+            stale = shortcuts.shortcut_paths()[0]
+            stale.parent.mkdir(parents=True, exist_ok=True)
+            stale.write_text("a .lnk from an earlier install")
+            result = shortcuts.install(None)
+            self.assertTrue(result["path"].endswith(".cmd"))
+            self.assertFalse(stale.exists(), "the .lnk should have been cleared")
+            self.assertTrue(shortcuts.status()["installed"])
+            shortcuts.remove()
+            self.assertFalse(shortcuts.status()["installed"])
+
 
 if __name__ == "__main__":
     unittest.main()

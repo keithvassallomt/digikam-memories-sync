@@ -30,3 +30,7 @@ stop:
     done
     echo "it did not stop" >&2
     exit 1
+
+# Regenerate every icon from assets/logo.png. Needs Pillow.
+icons:
+    python3 assets/make-icons.py
