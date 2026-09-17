@@ -10,6 +10,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sysconfig
 import sys
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,28 @@ ICONS = Path(__file__).with_name("icons")
 def icon_path(suffix: str) -> Path:
     """The packaged icon for one platform's idea of an icon file."""
     return ICONS / f"{FILE_STEM}{suffix}"
+
+
+def _package_root() -> Path:
+    """The directory that has to be on the path for ``-m digimem`` to work."""
+    return Path(__file__).resolve().parent.parent
+
+
+def working_directory() -> Path | None:
+    """Where the shortcut must run, or None if it can run anywhere.
+
+    A shortcut records an interpreter, which is only half the story: running
+    from a source checkout, the package is not installed for that interpreter
+    and is found through the working directory, because ``-m`` puts it at the
+    front of the path. Without that the entry launches, fails to import, and
+    exits without a window, which looks exactly like clicking it did nothing.
+    """
+    root = _package_root()
+    installed = {
+        Path(sysconfig.get_paths()[name]).resolve()
+        for name in ("purelib", "platlib")
+    }
+    return None if root in installed else root
 
 
 def _command(config_dir: str | Path | None = None) -> list[str]:
@@ -64,13 +87,15 @@ def shortcut_path() -> Path:
 
 def _desktop_entry(config_dir: str | Path | None) -> str:
     executable = " ".join(_quote(part) for part in _command(config_dir))
+    root = working_directory()
+    directory = f"\nPath={root}" if root else ""
     return f"""[Desktop Entry]
 Type=Application
 Name={APP_NAME}
 GenericName=Photo face synchronisation
 Comment=Keep digiKam and Nextcloud Memories faces in sync
 Exec={executable}
-Icon={icon_path(".png")}
+Icon={icon_path(".png")}{directory}
 Terminal=false
 Categories=Graphics;Photography;
 Keywords=digikam;nextcloud;memories;faces;
@@ -99,7 +124,9 @@ def _install_macos(config_dir: str | Path | None, bundle: Path) -> None:
     shutil.copyfile(icon_path(".icns"), resources / f"{FILE_STEM}.icns")
     arguments = " ".join(_quote(part) for part in _command(config_dir))
     runner = binaries / FILE_STEM
-    runner.write_text(f"#!/bin/sh\nexec {arguments}\n", encoding="utf-8")
+    root = working_directory()
+    move = f'cd "{root}" || exit 1\n' if root else ""
+    runner.write_text(f"#!/bin/sh\n{move}exec {arguments}\n", encoding="utf-8")
     runner.chmod(runner.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     (bundle / "Contents" / "Info.plist").write_text(
         f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -157,6 +184,8 @@ def shortcut_script(target: Path, config_dir: str | Path | None) -> str:
         f".CreateShortcut({_ps_quote(target)})",
         f"$s.TargetPath = {_ps_quote(_windows_executable())}",
         f"$s.Arguments = {_ps_quote(_windows_arguments(config_dir))}",
+        *([f"$s.WorkingDirectory = {_ps_quote(working_directory())}"]
+          if working_directory() else []),
         f"$s.IconLocation = {_ps_quote(icon_path('.ico'))}",
         f"$s.Description = {_ps_quote('Keep digiKam and Nextcloud Memories faces in sync')}",
         "$s.Save()",
@@ -188,8 +217,10 @@ def _install_windows(config_dir: str | Path | None, path: Path) -> Path:
     command = " ".join(
         [_quote(_windows_executable()), _windows_arguments(config_dir)]
     )
+    root = working_directory()
+    move = f'cd /d "{root}"\r\n' if root else ""
     fallback.write_text(
-        "@echo off\r\nstart \"\" " + command + "\r\n", encoding="utf-8"
+        "@echo off\r\n" + move + "start \"\" " + command + "\r\n", encoding="utf-8"
     )
     return fallback
 

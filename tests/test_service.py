@@ -318,6 +318,42 @@ class ShortcutTest(unittest.TestCase):
             shortcuts.remove()
             self.assertFalse(shortcuts.status()["installed"])
 
+    def test_the_entry_says_where_to_run_from_a_checkout(self) -> None:
+        """Recording the interpreter is half the story. Run from a source
+        checkout the package is not installed for it, and is found through the
+        working directory. Without that the entry launches, fails to import and
+        exits with no window, which looks exactly like nothing happening."""
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"XDG_DATA_HOME": tmp}
+        ), patch("sys.platform", "linux"), patch("digimem.shortcuts.subprocess.run"):
+            body = Path(shortcuts.install(None)["path"]).read_text()
+        line = next(l for l in body.splitlines() if l.startswith("Path="))
+        root = Path(line.removeprefix("Path="))
+        self.assertTrue(
+            (root / "digimem" / "__init__.py").is_file(),
+            "the recorded directory has to be the one that makes -m work")
+
+    def test_a_properly_installed_package_needs_no_working_directory(self) -> None:
+        root = str(Path(shortcuts.__file__).resolve().parent.parent)
+        with patch(
+            "digimem.shortcuts.sysconfig.get_paths",
+            return_value={"purelib": root, "platlib": root},
+        ):
+            self.assertIsNone(shortcuts.working_directory())
+
+    def test_the_macos_runner_moves_before_it_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "DigiMem.app"
+            shortcuts._install_macos(None, bundle)
+            runner = (bundle / "Contents" / "MacOS" / "digimem").read_text()
+        self.assertIn("cd ", runner)
+        self.assertLess(
+            runner.index("cd "), runner.index("exec "), "moving after is too late")
+
+    def test_the_windows_shortcut_records_where_to_run(self) -> None:
+        script = shortcuts.shortcut_script(Path("C:/DigiMem.lnk"), None)
+        self.assertIn("$s.WorkingDirectory = '", script)
+
     def test_every_platform_ships_the_icon_it_needs(self) -> None:
         for suffix in (".png", ".ico", ".icns"):
             with self.subTest(suffix=suffix):
