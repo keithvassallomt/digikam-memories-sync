@@ -1,157 +1,169 @@
-# Installing the digiKam Face Sync app in Nextcloud
+# Installing the Nextcloud companion app
 
-For version 0.5.0, which adds change detection. Written for a Nextcloud running
-in Docker inside an LXC container, reached by SSH to the container.
+DigiMem needs one small app on your Nextcloud server, called **digiKam Face
+Sync**. This page is for whoever administers that server. If that is not you,
+send them this page; it is the only thing they need to do.
 
-Nothing here touches your photos or the Recognize database. The two new
-endpoints only read.
+## What it is, and why it is needed
 
-## 1. Build the archive
+Recognize finds faces in your photos and can be told who they are. What it
+cannot do on its own is accept a face box that came from somewhere else —
+which is exactly what syncing from digiKam means.
 
-On the machine with this repository:
+The companion app adds that missing piece. It lets DigiMem, using your own
+account and an app password, hand Recognize a face box from digiKam, and read
+back the faces Recognize already knows about. It also answers two cheap
+questions DigiMem asks between syncs: *has anything changed since last time?*
+and *is Recognize busy right now?* — so DigiMem can stay quiet while Recognize
+works, and skip syncs where nothing has happened.
 
-```bash
-cd ~/LocalCode/keithvassallomt/digikam-memories-sync
-./build-nextcloud-app.sh
+It is installed separately from Recognize on purpose, so that updating
+Recognize cannot overwrite it.
+
+Nothing it does touches your photo files. It reads your photos and Recognize's
+face data, and adds the faces DigiMem sends it. It does not delete anyone's
+photos, and it does not change anything for users who are not using DigiMem.
+
+## What you need
+
+- Administrator access to the Nextcloud server, and a way to put files in its
+  apps directory.
+- **Recognize** installed and enabled, and finished analysing the photo library.
+  DigiMem cannot do anything useful until Recognize knows about the faces.
+- **Memories** installed, since that is the interface the faces are seen in.
+- PHP 8.2 or later.
+- A Nextcloud version this build of the app supports. Each release says which
+  versions it is for; Nextcloud refuses to enable an app outside that range and
+  says so plainly, which is the easy way to find out.
+
+## 1. Get the app
+
+Download `digikam_face_sync-<version>.tar.gz` from the
+[releases page](https://github.com/keithvassallomt/digikam-memories-sync/releases).
+It is listed alongside the DigiMem downloads for the same release.
+
+If you would rather build it from source, run `./build-nextcloud-app.sh` in a
+clone of the repository. It writes the same archive into `dist/`.
+
+## 2. Put it on the server
+
+Nextcloud loads apps from an apps directory. Most installations have one or
+both of these:
+
+```
+/var/www/html/apps
+/var/www/html/custom_apps
 ```
 
-It prints the path it wrote, which will be
-`dist/digikam_face_sync-0.5.0.tar.gz`. The `dist/` directory is ignored by git,
-so the archive is always built rather than committed.
+If `custom_apps` exists, use it: that is the one meant for apps that did not
+come with Nextcloud. Your own paths may differ — a snap or a distribution
+package puts Nextcloud elsewhere — and your Nextcloud administration page under
+**Settings → Administration → Overview** or your `config.php` will tell you
+where.
 
-## 2. Copy it to the LXC container
-
-```bash
-scp dist/digikam_face_sync-0.5.0.tar.gz YOUR_LXC:/tmp/
-ssh YOUR_LXC
-```
-
-## 3. Find the Docker container and the apps directory
-
-Do not assume either. Ask:
+Extract the archive so that a folder called `digikam_face_sync` ends up inside
+the apps directory:
 
 ```bash
-docker ps --format '{{.Names}}\t{{.Image}}' | grep -i nextcloud
+tar -xzf digikam_face_sync-<version>.tar.gz
+sudo mv digikam_face_sync /var/www/html/custom_apps/
 ```
 
-Take the container name from the first column and use it below as `$NC`.
+Then make sure the files belong to the user your web server runs as, or
+Nextcloud will not be able to read them. On most Linux installations that user
+is `www-data`:
 
 ```bash
-NC=nextcloud-app-1          # whatever the line above showed
-
-# Where the existing 0.4.0 copy lives tells you the right directory.
-docker exec "$NC" sh -c 'ls -d /var/www/html/*apps*/digikam_face_sync 2>/dev/null'
+sudo chown -R www-data:www-data /var/www/html/custom_apps/digikam_face_sync
 ```
 
-That prints something like `/var/www/html/custom_apps/digikam_face_sync`. The
-parent of that path is your apps directory. Use it below as `$APPS`.
+**If Nextcloud runs in a container**, do the same thing from outside it: copy
+the folder in with `docker cp` (or your platform's equivalent), then set the
+ownership with a command run inside the container. Everything below works the
+same way, with `occ` commands run inside the container.
+
+## 3. Turn it on
+
+In the Nextcloud web interface, go to your profile picture → **Apps**, then
+**Disabled apps**. *digiKam Face Sync* will be listed there. Press **Enable**.
+
+Or, from a terminal on the server:
 
 ```bash
-APPS=/var/www/html/custom_apps
+sudo -u www-data php occ app:enable digikam_face_sync
 ```
 
-If it prints nothing, the app is not installed yet. Use
-`/var/www/html/custom_apps` if that directory exists, and `/var/www/html/apps`
-otherwise.
+Either way is fine. If the app does not appear in the list at all, Nextcloud
+cannot see the files: check that the folder landed in a directory Nextcloud
+actually uses, and that the ownership is right.
 
-## 4. Replace the app
+The app has no database tables of its own, so there is nothing else to run.
+
+## 4. Check it from DigiMem
+
+The honest test is the one that matters: open DigiMem on your computer, go to
+**Settings → Libraries → Nextcloud → Change** (or the setup screen, on a fresh
+install) and press **Test connection**.
+
+- *Both libraries are reachable* — done.
+- *Recognize is not installed in Nextcloud* — Recognize is missing, or not
+  enabled for the account DigiMem is signing in with.
+- *The digiKam Face Sync app needs installing or updating* — Nextcloud is
+  answering, but it is not serving this app, or it is serving an older copy
+  than DigiMem needs. See below.
+
+## Updating it
+
+Replace the folder with the new version and enable it again:
 
 ```bash
-cd /tmp
-tar -xzf digikam_face_sync-0.5.0.tar.gz          # makes ./digikam_face_sync
-
-# Keep the old one until the new one is proven.
-docker exec "$NC" sh -c "mv $APPS/digikam_face_sync $APPS/digikam_face_sync.0.4.0" 2>/dev/null || true
-
-docker cp digikam_face_sync "$NC:$APPS/digikam_face_sync"
-docker exec "$NC" chown -R www-data:www-data "$APPS/digikam_face_sync"
+sudo rm -rf /var/www/html/custom_apps/digikam_face_sync
+sudo tar -xzf digikam_face_sync-<version>.tar.gz -C /var/www/html/custom_apps/
+sudo chown -R www-data:www-data /var/www/html/custom_apps/digikam_face_sync
+sudo -u www-data php occ app:enable digikam_face_sync
 ```
 
-## 5. Tell Nextcloud about it
+Enabling an app that is already enabled is safe, and is how Nextcloud notices
+the new version.
+
+If you would rather keep the old copy until the new one is proven, rename it
+instead of deleting it, and rename it back to roll the change back.
+
+DigiMem copes with an older companion app by turning off the features that need
+a newer one — it falls back to checking for changes on a timer rather than
+being told about them. Nothing breaks, and nothing is lost.
+
+## Removing it
 
 ```bash
-docker exec -u www-data "$NC" php occ app:enable digikam_face_sync
-docker exec -u www-data "$NC" php occ app:list | grep -A1 digikam
+sudo -u www-data php occ app:disable digikam_face_sync
+sudo rm -rf /var/www/html/custom_apps/digikam_face_sync
 ```
 
-The version shown should be 0.5.0. Enabling an app that is already enabled is
-safe and is how Nextcloud picks up the new version. This app has no database
-migrations, so there is nothing else to run.
+Faces DigiMem has already added stay in Recognize; they are ordinary Recognize
+faces. DigiMem itself will report that it can no longer reach the server side
+and will stop syncing until the app comes back.
 
-## 6. Check it from your workstation
+## If something is not working
 
-```bash
-NCURL=https://nc.vassallo.cloud
-AUTH='keith:YOUR_APP_PASSWORD'
+**The app is not in the Apps list.** Nextcloud is not looking at the directory
+you put it in, or cannot read it. Check `config.php` for the app directories
+Nextcloud is configured with, and check ownership.
 
-curl -s -u "$AUTH" -H 'OCS-APIRequest: true' -H 'Accept: application/json' \
-  "$NCURL/index.php/apps/digikam_face_sync/api/v1/face-import"
-```
+**Nextcloud refuses to enable it**, mentioning versions. This build of the app
+does not support your Nextcloud version. Use the release that matches, or
+upgrade Nextcloud.
 
-Look for `"apiVersion":5`, `"changeFingerprint":true` and
-`"recognizeStatus":true`. If those are false, Nextcloud is still serving the
-old copy: check step 4 landed in the right directory.
+**DigiMem still says the app is missing** after you enabled it. Nextcloud is
+probably still serving a cached older copy: enable it again, and check that the
+folder you replaced is the one Nextcloud is actually using — a second copy in
+another apps directory will quietly win.
 
-Then the two new endpoints themselves:
+**Faces are being rejected** when DigiMem applies changes. That is usually
+Recognize itself declining a face box rather than a problem with this app, and
+DigiMem has a screen for working through them — see
+[Using DigiMem](using-digimem.md#faces-that-could-not-be-added).
 
-```bash
-curl -s -u "$AUTH" -H 'OCS-APIRequest: true' -H 'Accept: application/json' \
-  "$NCURL/index.php/apps/digikam_face_sync/api/v1/changes"
-
-curl -s -u "$AUTH" -H 'OCS-APIRequest: true' -H 'Accept: application/json' \
-  "$NCURL/index.php/apps/digikam_face_sync/api/v1/status"
-```
-
-The first returns detection and cluster counts with two hashes. Rename a person
-in Memories and call it again: the hashes must change. The second returns
-`recognize_busy` and, when something is running, the job names.
-
-## 7. Clean up
-
-Once the checks pass:
-
-```bash
-docker exec "$NC" sh -c "rm -rf $APPS/digikam_face_sync.0.4.0"
-rm -rf /tmp/digikam_face_sync /tmp/digikam_face_sync-0.5.0.tar.gz
-```
-
-## Rolling back
-
-```bash
-docker exec "$NC" sh -c "rm -rf $APPS/digikam_face_sync && mv $APPS/digikam_face_sync.0.4.0 $APPS/digikam_face_sync"
-docker exec -u www-data "$NC" php occ app:enable digikam_face_sync
-```
-
-DigiMem detects the older app and turns change detection off by itself,
-falling back to the daily check. Nothing breaks.
-
-## Then, on the desktop side
-
-```bash
-cd ~/LocalCode/keithvassallomt/digikam-memories-sync
-git checkout phase-2
-python -m pip install -e .
-
-# Stop any running service first, then:
-digimem service
-```
-
-In the interface, open Settings and turn Automatic sync on. DigiMem checks
-Nextcloud every 5 minutes and your digiKam library whenever its file changes,
-waits 10 minutes after the last change, and syncs. It waits for Recognize to
-finish, and holds digiKam changes until you quit digiKam.
-
-To see it working, watch the Logs page, or:
-
-```bash
-tail -f ~/.config/digikam-memories-sync/logs/digimem.log
-```
-
-## If something looks wrong
-
-Nextcloud's own log, filtered to this app:
-
-```bash
-docker exec -u www-data "$NC" php occ log:watch 2>/dev/null \
-  || docker exec "$NC" tail -f /var/www/html/data/nextcloud.log
-```
+**For anything else**, Nextcloud's own log is the place to look:
+**Settings → Administration → Logging**, or the log file named in your
+`config.php`.

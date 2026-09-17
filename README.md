@@ -1,187 +1,105 @@
 # DigiMem
 
-This project reconciles face names and rectangles between a local digiKam
-library and Nextcloud Memories/Recognize.
+**Two-way face sync between digiKam and Nextcloud Memories.**
 
-The guided desktop UI previews and applies changes in both directions. It
-provides photo-based conflict review, creates a consistent digiKam database
-backup before local writes, and records each operation so an interrupted Apply
-can resume without repeating completed changes.
+Name someone in digiKam and the name appears in Memories. Name someone in
+Memories and it appears in digiKam. Face boxes travel the same way, so a face
+one library has found and the other has not gets added rather than lost.
 
-## Repository layout
+> [!NOTE]
+> <img width="200" height="auto" alt="friendly-manifesto-badge" src="https://github.com/user-attachments/assets/cb91210b-0f66-46fe-93a8-a3a67857593c" /> <br>
+> This project voluntarily adheres to The Friendly Manifesto. Read more [here](https://friendlymanifesto.org)
 
-```text
-digimem/                       Python sync engine, service and HTTP client
-  web/                         Browser interface: index.html, css/, js/
-  web/js/views/                One module per screen
-tests/                         Python tests
-nextcloud-app/
-  digikam_face_sync/           Separately installable Nextcloud app
-docs/
-  architecture.md              What the parts are and how they fit
-  install-nextcloud-app.md     Installing the companion app
-  prototypes/                  UI prototypes, phase 1 and phase 2
-phase2.md                      Phase 2 design: automatic operation
-backlog.md                     What is next, and what was deferred
-sync_faces.py                  Current command-line entry point
-config.example.yaml            Development configuration example
-```
+DigiMem runs quietly in the background on the computer where digiKam lives, and
+opens a window when you want to see what it has been doing. It asks you
+questions only when it genuinely cannot know the answer — when the same face
+has a different name in each library — and keeps syncing everything else while
+it waits.
 
-The Nextcloud app is separate from Recognize, so a Recognize update does not
-overwrite it. Build its installable archive with:
+- **Both directions**, names and face rectangles alike.
+- **Automatic**, or only when you ask.
+- **Safe with digiKam**: local writes happen only while digiKam is closed, and
+  its database is copied first.
+- **Interruptible**: a sync that is cut short resumes where it stopped rather
+  than starting again.
+- **Yours**: everything stays between your computer and your own Nextcloud.
 
-```bash
-./build-nextcloud-app.sh
-```
+## What you need
 
-The HTTP client checks the server during connection:
+- digiKam, with the face tags you already use.
+- A Nextcloud server running **Memories** and **Recognize**.
+- The small **digiKam Face Sync** companion app on that server, which lets
+  Recognize accept face boxes that came from digiKam.
 
-1. Recognize must be installed and enabled. A missing Recognize DAV collection
-   is an error.
-2. The digiKam Face Sync app must expose its face-import capability. When it is
-   missing, the UI will offer the configured installation page. The temporary
-   page is `https://keithvassallo.com`.
+Linux, macOS (Apple Silicon) and Windows.
+
+## Getting started
+
+Downloads are on the
+[releases page](https://github.com/keithvassallomt/digikam-memories-sync/releases).
+
+- **[Start here](docs/index.md)** — what DigiMem is and how the pieces fit.
+- **[Installing DigiMem](docs/install-digimem.md)** — the desktop application,
+  and connecting it to your two libraries.
+- **[Installing the Nextcloud companion app](docs/install-nextcloud-app.md)** —
+  the server side, done once.
+- **[Using DigiMem](docs/using-digimem.md)** — every screen, and what to do
+  with it.
+
+## How it works, briefly
+
+**It matches photos, not folders.** The two libraries do not have to be
+arranged the same way. DigiMem works out which photo in Nextcloud is which
+photo in digiKam, and compares the faces on them.
+
+**It remembers what both sides agreed on.** For every face, DigiMem keeps the
+name the two libraries last agreed on. That is what turns "these names differ"
+into "this one was renamed, so rename the other" — and it is why you are only
+asked about a face that changed on *both* sides, or one it has never seen
+before.
+
+**It notices changes rather than polling everything.** A change in either
+library starts a short wait rather than an immediate sync, so twenty renames
+produce one sync afterwards instead of twenty while you work. Where a change
+can be pinned on one person, only that person is synced, which turns the common
+case from minutes into seconds. A full sweep still runs daily as a safety net.
+
+**It waits its turn.** DigiMem holds off while Recognize is busy with its own
+work, and holds digiKam's half of a sync until you quit digiKam. Opening
+digiKam part way through stops local writes within a second; the rest waits.
+
+**Nothing is written until the whole picture is known.** A sync first reads
+both libraries and produces a plan. Applying that plan re-checks each face
+before touching it, records what it has done, and can pick the rest up later.
+digiKam's database is copied before the first local change, into a `backups/`
+folder you can find from the Settings screen.
+
+The companion app is what makes the Nextcloud half possible: Recognize will not
+accept a face box from elsewhere on its own. It is installed separately from
+Recognize so that updating Recognize cannot overwrite it.
+
+[docs/architecture.md](docs/architecture.md) has the full account, including
+what DigiMem deliberately does not do.
 
 ## Development
 
 ```bash
 python -m pip install -e '.[desktop]'
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests
 ```
 
-The `desktop` extra carries `psutil`, which is what lets macOS and Windows tell
-whether digiKam is open. Without it those platforms cannot tell, and an
-automatic run will not wait for digiKam. Linux reads `/proc` and needs nothing.
+[docs/architecture.md](docs/architecture.md) describes the parts, the
+repository layout and how a sync actually runs.
 
-## Automatic operation
+## Licence
 
-DigiMem can keep both libraries in step without being asked. Turn it on in
-Settings, or at the end of first-run setup.
+DigiMem is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. The full text is in `LICENSE`, and the program comes with no
+warranty.
 
-It watches digiKam's database file and polls Nextcloud every few minutes. A
-change starts a wait rather than a sync, so twenty renames produce one sync
-afterwards instead of twenty while you work. The wait is capped an hour from
-the first change, so a busy library still syncs hourly.
+The Nextcloud companion app under `nextcloud-app/` is AGPLv3, as the Nextcloud
+app store requires; its own `COPYING` applies there.
 
-It waits for Recognize to finish its own work, and holds digiKam's half of a
-sync until you quit digiKam. Opening digiKam part way through stops the writes
-within a second and the rest waits.
-
-DigiMem remembers the name both libraries last agreed on for each face, so a
-rename in either one is applied to the other rather than queued as a question.
-Only a face renamed on both sides, or one with no history, waits for you.
-
-Both libraries are also fingerprinted per person, so a change that belongs to
-one person is synced by looking at that person rather than at everything. That
-turns the common case, one person being named or corrected, from minutes into
-seconds. A change that cannot be pinned on exactly one person, and the daily
-sweep, still look at everyone.
-
-## The library check
-
-Before every sync, DigiMem looks at digiKam itself for face boxes that cannot
-sync cleanly however often it tries. It takes about 140 ms over 13,700 faces
-and never holds a sync up: these are suspicions, not faults, and a sync that
-waited for someone to work through a list would stop being automatic.
-
-Two things are looked for. **A person tagged more than once in one photo**,
-because a person has one face in a photograph, so one of the boxes is usually a
-mistake. And **a box drawn inside another person's**, because faces do not nest.
-
-They arrive in Needs attention with the photo and every box drawn on it. With
-two boxes each gets its own Remove button; with more, they are ticked and the
-two buttons below decide whether the ticks meant keep or remove. There is also
-Remove all, for a photo where the person is not there at all.
-
-Removing needs digiKam closed, and backs up `digikam4.db` once per sitting
-rather than once per box. Keeping them is remembered and never asked again. An
-automatic sync that finds new ones says so once.
-
-Left alone, a wrongly drawn box is proposed on every run and refused on every
-run, for ever, because the other library has a different person in that spot.
-
-## What a sync does
-
-Three settings shape every sync, manual or automatic.
-
-**When the two libraries disagree** decides what happens to the faces the
-ledger cannot settle. *Ask me* is the default and queues them for review.
-*Trust digiKam* and *Trust Memories* rename the other library to match without
-asking, which is worth having on a library with no history, where most
-disagreements are simply one side being right. The same choice is offered as
-"Always use this library from now on" while reviewing a conflict.
-
-**Create face boxes in Memories** and **Create face boxes in digiKam** each
-turn off the slow half of a first sync. With Memories off, a sync is names
-only: faces Recognize already found get their digiKam name, and no new boxes
-are drawn. Naming and box creation are separate questions, so turning one off
-changes nothing about the other or about disagreements.
-
-## Commands
-
-```bash
-digimem                          # open the interface, starting the service if needed
-digimem ui --foreground          # run the service in this terminal instead
-digimem service                  # run the background service
-digimem run --config config.yaml # one-off command-line sync
-digimem autostart enable         # start DigiMem at login
-digimem shortcuts install        # add it to the application menu
-digimem service --once           # start up, do one pass, exit (build check)
-```
-
-One service owns a configuration directory. It holds `service.lock` so a second
-copy cannot start, and publishes its port and session token in `service.json`
-so the launcher and shortcuts can find it. Starting a second service prints the
-address of the running one and exits with status 3.
-
-The service logs to `logs/digimem.log` under the configuration directory and
-to the state database, so the interface can show logs without reading files.
-
-## The interface
-
-The browser interface is plain ES modules, no framework and no build step. The
-shell in `index.html` holds the rail; `js/main.js` routes between screens by
-hash and mounts one view at a time. Each screen is a module under `js/views/`
-that returns `{ element, enter, leave, update }`.
-
-Shared pieces sit beside them: `api.js` is the only place that talks to the
-service, `store.js` polls the status once for every screen, `copy.js` holds
-every sentence the interface says, and `crop.js` carries the face-box geometry
-the two review screens share.
-
-Settings are versioned. A version 1 file is upgraded in place on first load,
-with automatic sync left off so upgrading never starts changing libraries on
-its own.
-
-Command-line runs are previews unless `--apply` is supplied. The command line
-has no ledger, so it treats every disagreement as a conflict, which is the
-behaviour it has always had.
-
-## The Nextcloud companion app
-
-`nextcloud-app/digikam_face_sync` is installed separately from Recognize, so a
-Recognize update cannot overwrite it. Build its archive with
-`./build-nextcloud-app.sh`, and see `docs/install-nextcloud-app.md` for
-installing it.
-
-Version 0.5.0 adds two read-only endpoints DigiMem polls between syncs: a
-fingerprint of which person each named face belongs to, and whether Recognize
-is busy. An older version simply leaves change detection off, and DigiMem
-falls back to its daily check.
-
-The interface implements first-run setup, All/One-person selection, a read-only
-two-way preview, conflict decisions and an explicit Apply step. Close digiKam
-before applying local changes; the UI checks this and always requires
-confirmation. The check reads `/proc` on Linux and uses `psutil` elsewhere, so
-macOS and Windows need the `desktop` extra to notice an open digiKam at all. If digiKam remains open without a visible window, the Apply page
-can ask it to close and waits until it releases the database. Preview runs,
-notifications, conflict decisions, operation
-results and face links are persisted in the application state database.
-If a model rejects an individual face, the result screen shows a zoomed review
-with its source name and rectangle. The user can adjust the rectangle for a
-targeted retry or keep the face in its source library; remembered one-sided
-faces are suppressed in later previews unless their source box changes.
-
-Backups are stored under the application's configuration directory in
-`backups/`. On Linux this is normally
-`~/.config/digikam-memories-sync/backups/`.
+Copyright © 2026 Keith Vassallo.

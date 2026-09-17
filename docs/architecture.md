@@ -6,6 +6,23 @@ library and Nextcloud Memories/Recognize, in both directions, on its own.
 The phase 2 design document, `phase2.md`, carries the reasoning behind
 automatic operation. This file describes what the parts are and how they fit.
 
+## Repository layout
+
+```text
+digimem/                       Python sync engine, service and HTTP client
+  web/                         Browser interface: index.html, css/, js/
+  web/js/views/                One module per screen
+tests/                         Python tests
+nextcloud-app/
+  digikam_face_sync/           Separately installable Nextcloud app
+docs/                          User documentation, and this file
+phase2.md                      Phase 2 design: automatic operation
+backlog.md                     What is next, and what was deferred
+release_template.md            Release notes around the changelog entry
+sync_faces.py                  Current command-line entry point
+config.example.yaml            Development configuration example
+```
+
 ## Components
 
 - `digimem`: the engine. Matching, the digiKam reader and writer, and
@@ -38,6 +55,36 @@ automatic operation. This file describes what the parts are and how they fit.
 
 Closing the browser does not stop anything. `digimem service --once` starts
 up, does a single pass of work and exits, which is what a build check runs.
+
+## The service
+
+One service owns a configuration directory. It holds `service.lock` so a second
+copy cannot start, and publishes its port and session token in `service.json`
+so the launcher and shortcuts can find it. Starting a second service prints the
+address of the running one and exits with status 3.
+
+It logs to `logs/digimem.log` under the configuration directory and to the
+state database, so the interface can show logs without reading files.
+
+## The interface
+
+Plain ES modules, no framework and no build step. The shell in `index.html`
+holds the rail; `js/main.js` routes between screens by hash and mounts one view
+at a time. Each screen is a module under `js/views/` that returns
+`{ element, enter, leave, update }`.
+
+Shared pieces sit beside them: `api.js` is the only place that talks to the
+service, `store.js` polls the status once for every screen, `copy.js` holds
+every sentence the interface says, and `crop.js` carries the face-box geometry
+the review screens share.
+
+Settings are versioned. A version 1 file is upgraded in place on first load,
+with automatic sync left off, so upgrading never starts changing libraries on
+its own.
+
+Command-line runs are previews unless `--apply` is supplied. The command line
+has no ledger, so it treats every disagreement as a conflict, which is the
+behaviour it has always had.
 
 ## How a sync happens
 
@@ -97,3 +144,20 @@ The tab title carries the count regardless, which needs no permission.
 - Clicking an operating-system notification does not open a particular screen.
   No platform offers that without more machinery than it is worth, and the
   browser channel covers the case where it matters.
+
+## Working on it
+
+```bash
+python -m pip install -e '.[desktop]'
+python -m unittest discover -s tests -v
+```
+
+The `desktop` extra carries `psutil`, which is what lets macOS and Windows tell
+whether digiKam is open. Without it those platforms cannot tell, and an
+automatic run will not wait for digiKam. Linux reads `/proc` and needs nothing.
+
+`just` lists the other recipes: running the service in the foreground,
+regenerating the icons, and cutting a release.
+
+Build the companion app's installable archive with `./build-nextcloud-app.sh`,
+which writes it into `dist/`.

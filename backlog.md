@@ -1,110 +1,249 @@
-# DigiMem v{{VERSION}}
+The basic sync functionality is now working well. So here's what's next for the app.
 
-{{CHANGELOG}}
+1. Automatic operation.
+2. Robustness.
 
-## 📦 Installation
+- When the UI launches, right now we're thrown straight into the wizard to do the sync operation. Now, our app is going to have configuration options, such as configuring the automatic operation, login and so on. So we need to take that into account as the home screen. 
 
-DigiMem needs two things installed: the desktop application, on the machine
-where digiKam lives, and the companion app on your Nextcloud server. Neither
-works without the other.
+- We need to allow configuration to be a one time thing. So the user has a settings page where they can configure their Digikam photo library and nextcloud connection. When a sync occurs, these settings are simply verified, and the step is therefore skipped if everything is ok. 
 
-### Linux
+- We also need automatic operation. Now, this is not as easy as it seems. We need to account for:
+    A. DigiKam being open and in use when the sync is scheduled to run.
+    B. Laptops and other devices that can sleep or be suspended mid-run.
+    C. Temporary connection failure.
 
-**Debian, Ubuntu, Linux Mint**
+    This necessitates the following:
+    - We need to know when DigiKam is open and in use, and defer any operations whilst that's the case. 
+    - We should probably also know when recognize is running it's batch task. Although this typically runs off-hours. 
+    - When a run is interrupted, it should be able to pick up exactly where it left off. 
+    - The user might start DigiKam whilst a run is ongoing. We need to handle this. Perhaps, we can make changes to a copy of the library, and then wait for digikam to shutdown, reconcile changes in the database (i.e. our copy and the latest digikam db) and replace the primary copy.
 
-```bash
-sudo apt install ./digimem_{{VERSION}}_all.deb
-```
+- Ideally, we should be able to detect changes to the DB, or Memories, and then trigger a sync. We would however need a backoff to ensure that many small changes do not end up being hundreds of individual sync jobs. 
 
-**Fedora, RHEL, openSUSE**
+- Logging, viewable through the UI itself.
 
-```bash
-sudo dnf install ./digimem-{{VERSION}}-1.noarch.rpm
-```
+- A .desktop file (linux) and relevant aliases/shortcuts on macOS/Windows which simply open the web ui.
 
-Both packages use your distribution's own Python rather than bundling one, so
-they are small and work on any architecture. They need Python 3.10 or later.
+- Options to pause/resume automatic synchronisation.
 
-**Any distribution — AppImage**
+We need to start with a proper design document based on the above, including UI prototypes of how this will work. We need to get the flow right in the UI before working on the implementation. This software should be incredibly easy to use and obvious to the end user. 
+---
 
-```bash
-chmod +x DigiMem-{{VERSION}}-x86_64.AppImage
-./DigiMem-{{VERSION}}-x86_64.AppImage
-```
+# Deferred
 
-The AppImage carries its own Python and needs nothing installed. It is built
-against glibc 2.35, so it runs on Ubuntu 22.04, Debian 12 and Fedora 36
-onwards. On anything older, use the `.deb` or `.rpm` — they bundle no
-interpreter and so have no such floor.
+Not part of phase 2. Recorded so the reasoning is not lost.
 
-Then add DigiMem to your application menu and, if you want it, to your login
-items:
+## Sync one person when only one person changed — done
 
-```bash
-digimem shortcuts install
-digimem autostart enable
-```
+A full preview takes minutes on this library, and most of what triggers one is
+a single person being named or corrected. Both fingerprints now carry a hash
+per person, so a trigger can say who moved, and a change that names exactly one
+person starts a run scoped to them.
 
-### macOS
+Reading the per-person hashes is free: it is the same scan that produced the
+whole-library value. About 20 ms over 13,756 face regions and 133 people.
 
-1. Open `DigiMem-{{VERSION}}-arm64.dmg` and drag **DigiMem** to Applications.
-2. Launch it from Applications or Spotlight.
+Measured end to end on 17 September 2026: two faces tagged as one person,
+noticed, waited out the quiet period, and synced themselves in 49 seconds
+against the 2m45s a full run takes here. Nothing followed it. The saving scales
+with how many photos that person appears in — 2,927 of 8,404 for this one — not
+with the size of the library, so a rarely photographed person is much cheaper
+again and a very common one saves little.
 
-Apple Silicon only (M1 and later). There is no Intel build.
+Two things must stay conservative, and do. A change no one can be blamed for
+looks at everyone: an older companion app, a digiKam face on a tag that is not
+a person, a rename, which reads as two people rather than one. And the daily
+fallback sweep is never scoped, because it exists to catch what the
+fingerprints missed.
 
-The app is signed with an Apple Developer ID and notarised by Apple, so it
-opens without any warning or right-click workaround.
+The bookkeeping is the subtle half, and the first live test found two faults in
+it. Both came from the same place: a run is judged against a fingerprint that
+its own apply has already moved.
 
-macOS needs the `psutil` package to notice when digiKam is open. It is bundled,
-so there is nothing to install.
+**A sync used to be chased by another one over its own writes.** The promotion
+recorded the libraries as they were when the run *started*, deliberately, so an
+edit made during a long run was still noticed afterwards. But the run's own
+writes move the same fingerprint, so every apply left the library reading as
+changed and triggered a follow-up. Worse for the optimisation than for
+correctness: the follow-up was attributed to every person the apply had touched,
+so it was never scoped. Measured on the real thing, a 17-change sync wrote to
+six people in Memories and one in digiKam, and the follow-up was a full
+three-minute sweep that found one thing.
 
-### Windows
+**And every scoped run asked for a full one afterwards.** A scoped run left the
+whole-library value alone, on the grounds that it had only looked at one
+person. But that value is what says "something changed", so it stayed stale for
+ever: the next poll read the library as changed, found nobody to name, and fell
+back to looking at everyone. The optimisation paid for itself once and then
+handed the cost straight back.
 
-1. Run `DigiMem-{{VERSION}}-Setup.exe`.
-2. Windows SmartScreen will warn you that the publisher is unknown, because the
-   installer is not code-signed. Choose **More info**, then **Run anyway**.
-3. The installer offers a desktop shortcut and a login item; both are optional
-   and can be changed later from Settings.
+Both are fixed by measuring a second time when the run settles, and comparing.
+A person is claimed when the run looked at them and either nothing moved while
+it ran or the run moved it itself — which it knows from its own journal,
+including the `old_person` a rename moves a face away from. Anyone else keeps
+the entry they had, so they are still noticed and still named. When nothing is
+left over, the whole-library value moves too, which is what stops both cycles.
+The fallback clock still only resets for a run that looked at everything.
 
-DigiMem installs for the current user by default, so no administrator prompt
-appears.
+What this gives up: a change made during a run, to a person that same run wrote
+to, is folded into what the run claims to have synced. The window is one run
+long and one person wide, and the daily sweep catches it.
 
-### Nextcloud — the companion app
+## Adjusting a box corrects the library it came from — done
 
-Required on every platform. `digikam_face_sync` is installed separately from
-Recognize, so a Recognize update cannot overwrite it.
+Reviewing a rejected face and moving its rectangle used to change only what was
+sent to the other library. The box it came from was left where it was, and that
+made a loop nothing could end.
 
-1. Download `digikam_face_sync-{{NEXTCLOUD_VERSION}}.tar.gz` from this release.
-2. Extract it into your Nextcloud `apps/` (or `custom_apps/`) directory.
-3. Enable it:
-   ```bash
-   sudo -u www-data php occ app:enable digikam_face_sync
-   ```
+Traced on one real face, Eli Vassallo in `2026/03/26-03-03 12-35-32 182.jpg`:
 
-It needs Nextcloud 34 and PHP 8.2 or later, with Recognize installed and
-enabled. Full instructions, including permissions and troubleshooting, are in
-[docs/install-nextcloud-app.md](docs/install-nextcloud-app.md).
+1. digiKam had an Eli box at `(0.1037, 0.3241, 0.3904, 0.3064)`, drawn over
+   Gail's face.
+2. Run 14 proposed it, the review moved it down onto Eli, and *that* rectangle
+   went into Memories as detection 36144. digiKam's box never moved.
+3. Run 15's reverse pass then saw a Memories face with no digiKam counterpart
+   and created a second digiKam box for it. Now there were two.
+4. The original still matched nothing: IoU 0.296 against Eli's detection, below
+   the 0.40 threshold. It overlapped Gail's detection by 0.588, but digiKam's
+   own Gail box matched that at ~1.0 and took it first.
+5. So every run proposed it, and every apply refused it, because a different
+   person's face was already there. Adjusting again each time landed on the
+   detection that already existed and returned "changed: false", leaving
+   digiKam exactly as it was.
 
-## ⬆️ Upgrading
+The rectangle is now written back to digiKam, behind the same rules as any
+other local write: digiKam has to be closed, and the database is backed up
+first. Moving it where it already is writes nothing, and a face somebody has
+since moved or deleted themselves is left alone.
 
-Install the new package over the old one; settings, the face ledger and the
-operation history are kept. Settings files are upgraded in place on first
-launch, with automatic sync left off, so an upgrade never starts changing your
-libraries on its own.
+Only the digiKam direction can be corrected. The box came from there, and
+Recognize has no endpoint for moving a detection it already holds, so a
+`create_digikam` face adjusted in review still only changes what is written.
 
-Upgrade the Nextcloud companion app whenever its version changes — DigiMem
-tells you on the connection screen if the server side is too old for a feature
-it wants.
+## Cross-platform process detection — done
 
-## 🔒 Privacy
+macOS and Windows can now tell whether digiKam is open, through `psutil` in the
+`desktop` extra. Linux keeps the dependency-free `/proc` scan. Confirmed
+working on both platforms.
 
-All data stays on your machine. No telemetry or data collection.
+## Trust one library — done
 
-## 📚 Resources
+I know my digiKam library is correct. So both manual and automatic syncs need
+an option to **trust digiKam** or **trust Memories**: instead of asking about
+every disagreement, the trusted library's name simply wins and the change is
+made to the other one.
 
-- **Getting started**: [README](README.md)
-- **How the parts fit together**: [docs/architecture.md](docs/architecture.md)
-- **Installing the Nextcloud app**: [docs/install-nextcloud-app.md](docs/install-nextcloud-app.md)
-- **Automatic operation, in detail**: [phase2.md](phase2.md)
-- **Full history**: [CHANGELOG.md](CHANGELOG.md)
-- **Issues**: [GitHub Issues](https://github.com/keithvassallomt/digikam-memories-sync/issues)
+Three settings, then, rather than two: ask me, trust digiKam, trust Memories.
+"Ask me" stays the default, because the wrong choice here rewrites names in
+bulk.
+
+### What was built
+
+`sync.conflict_policy` in settings, offered under "What a sync does" and as
+"Always use this library from now on" next to a conflict you are already
+deciding. The engine takes a policy rather than the old
+`prefer_digikam_on_conflict` boolean, and the command line maps its existing
+config key onto it.
+
+A trusted library no longer raises the disagreement at all. It used to be
+recorded *and* overwritten, which would have filled Needs attention with
+questions the setting had already answered.
+
+Trusting Memories turned out not to need the reverse pass at all. The backlog
+assumed it would, but the forward pass gained a `reassign_digikam` branch when
+the ledger landed, so trusting Memories reuses it: the same rename the ledger
+would have proposed had it known which side moved. The reverse pass only had to
+stop asking, the way it already does for a pair the ledger has attributed.
+
+### How it interacts with the ledger
+
+Phase 2 already resolves most disagreements without asking, by remembering the
+name both libraries last agreed on. Trusting a library only changes what
+happens to the cases the ledger cannot settle: a face renamed on both sides,
+and a face with no history at all.
+
+On a library with no history that is still most of them, which is exactly the
+situation that makes this worth having.
+
+## Bulk retry for rejected faces — done
+
+Built. The review screen's checkbox now applies to whichever choice you make,
+so "Add using this box" with it ticked adds every remaining rejected face,
+each keeping its own rectangle.
+
+One click would mark every remaining rejected face as a confirmed digiKam box,
+leave its rectangle alone, and put it back in the queue. Applying then sends
+`confirmed: true`, which the companion app treats as "this rectangle is already
+the detection": it skips Recognize's face detector and computes the descriptor
+straight from the box using the same landmark alignment and recognition model
+Recognize uses afterwards.
+
+It would not adjust any box, would not bypass the overlapping-face guard, and
+would not guarantee success, since landmark alignment can still fail. Anything
+that fails again comes back to the queue.
+
+This is distinct from trusting a library. A bulk retry is a decision about
+faces already rejected, taken after looking at them. Trusting digiKam is a
+standing policy applied before anything is rejected.
+
+### What the first full sync showed
+
+7,977 changes applied in about four hours, roughly two seconds each.
+
+| | |
+|---|---|
+| Applied | 7,706 |
+| Rejected by Recognize's detector | 264 |
+| Caught by the overlap guard | 2 |
+
+The rejected boxes were six times smaller than the accepted ones by area, and
+three quarters of them under a quarter of the typical accepted size. They are
+small faces in group shots, spread over 48 people.
+
+Reviewing them one at a time showed the digiKam boxes were right in the
+overwhelming majority, and the faces clear. That is 271 individual clicks to
+reach a conclusion that was the same every time, which is the argument for the
+bulk action.
+
+### Confirmed is now the default — decided
+
+Every insert offers digiKam's box as the detection, not just a retry. Recognize
+detects first regardless, so this changes nothing about the faces it finds; it
+only decides what happens to the ones it finds nothing in. On this library that
+was 264 faces whose boxes a review found correct nearly every time, so the
+alternative was a guaranteed round of clicks for a known answer.
+
+The counter-argument was accepted rather than answered: it hands Recognize
+descriptors from boxes its own detector rejected, and those descriptors join
+clusters and pull their centroids, which can merge two people. Nobody reviews
+them now.
+
+So the effect is at least recorded. The companion app returns the descriptor
+confidence and DigiMem kept throwing it away; an insert result now carries
+`score`, where zero means the box was taken as given. Comparing those faces
+against their own cluster's other members is what would show the damage, if
+there is any.
+
+A server too old for confirmed inserts refuses them outright, so an unreviewed
+face settles for the detector rather than failing the run. A reviewed one still
+insists, because falling back would only put it through the detector that
+rejected it in the first place.
+
+## Related: the Memories side is much sparser than digiKam
+
+Measured on the development library, sampling 80 photos that carry faces:
+
+- Half of digiKam's face rectangles have no Recognize detection at that spot.
+- A fifth are detected by Recognize but unnamed.
+- Just under a third already agree.
+
+digiKam knows 133 people; Memories knows 12. A full sync would propose creating
+roughly 6,900 face boxes in Memories, which is the slow path and the one that
+produces rejections.
+
+Decided: creating boxes is its own setting, one per direction, under "What a
+sync does". Both are on, which is what every sync did before they existed.
+Turning off "Create face boxes in Memories" leaves a names-only sync: faces
+Recognize already found get their digiKam name, and the 6,900 slow inserts wait
+for a later decision. Naming and box creation are separate questions, so the
+disagreement above is still raised either way.

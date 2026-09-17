@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render backlog.md into the notes for one GitHub release.
+"""Render release_template.md into the notes for one GitHub release.
 
 Relative links are rewritten to point at the tag rather than the repository
 root. A release is a fixed thing; its links should keep working after the files
@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import changelog  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE = ROOT / "backlog.md"
+TEMPLATE = ROOT / "release_template.md"
 INFO_XML = ROOT / "nextcloud-app" / "digikam_face_sync" / "appinfo" / "info.xml"
 REPO = "keithvassallomt/digikam-memories-sync"
 
