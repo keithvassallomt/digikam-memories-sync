@@ -48,6 +48,13 @@ export function create({ go, refresh }) {
           'Memories rejected these faces. Adjust the box, or keep them in digiKam only.',
           inbox.failure_count, 'face', '/attention/failures'));
       }
+      if (inbox.issue_count) {
+        parts.push(section(
+          'Face boxes that look wrong',
+          'digiKam has a person tagged twice in one photo, or a box drawn inside '
+          + "someone else's. These cannot sync cleanly until they are sorted out.",
+          inbox.issue_count, 'photo', '/attention/library'));
+      }
       if (notify.supported() && notify.permission() === 'default') {
         parts.push(card(h('div', { class: 'row' },
           h('div', {},

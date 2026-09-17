@@ -77,6 +77,25 @@ turns the common case, one person being named or corrected, from minutes into
 seconds. A change that cannot be pinned on exactly one person, and the daily
 sweep, still look at everyone.
 
+## The library check
+
+Before every sync, DigiMem looks at digiKam itself for face boxes that cannot
+sync cleanly however often it tries. It takes about 140 ms over 13,700 faces
+and never holds a sync up: these are suspicions, not faults, and a sync that
+waited for someone to work through a list would stop being automatic.
+
+Two things are looked for. **A person tagged more than once in one photo**,
+because a person has one face in a photograph, so one of the boxes is usually a
+mistake. And **a box drawn inside another person's**, because faces do not nest.
+
+They arrive in Needs attention with the photo and both boxes drawn. You can
+remove the wrong one without leaving DigiMem, which needs digiKam closed and
+backs up `digikam4.db` first, or keep both, which is remembered and never asked
+again. An automatic sync that finds new ones says so once.
+
+Left alone, a wrongly drawn box is proposed on every run and refused on every
+run, for ever, because the other library has a different person in that spot.
+
 ## What a sync does
 
 Three settings shape every sync, manual or automatic.

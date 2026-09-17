@@ -22,6 +22,7 @@ from .digikam_writer import (
     terminate_digikam,
 )
 from . import checkpoint as checkpoint_module
+from . import health
 from . import desktop
 from . import coordinator as coordinator_module
 from . import notify, status as status_module
@@ -313,6 +314,93 @@ class AppService:
     def attention(self) -> dict[str, Any]:
         return self.state.attention()
 
+    # ---------------------------------------------------- the library check
+
+    def check_library(self, *, notify_on_new: bool = False) -> dict[str, int]:
+        """Look for face boxes that are wrong rather than merely unsynced.
+
+        Cheap enough to do before every sync: about 140 ms over 13,700 faces.
+        It never blocks one. A sync that refused to run until somebody had been
+        through a list would stop being automatic, and these are suspicions,
+        not faults.
+        """
+        database = self.settings.load().get("digikam_db")
+        if not database:
+            return {"added": 0, "closed": 0, "open": 0}
+        try:
+            issues = health.scan(database)
+        except Exception:
+            LOG.exception("Could not check the digiKam library")
+            return {"added": 0, "closed": 0, "open": 0}
+        result = self.state.save_library_issues([issue.to_dict() for issue in issues])
+        if notify_on_new and result["added"]:
+            self.state.create_notification(
+                "library.issues",
+                f"{result['added']} face boxes look wrong",
+                "digiKam has faces that cannot sync cleanly until you look at them.",
+                "/attention",
+            )
+        return result
+
+    def library_issues(self) -> dict[str, Any]:
+        return {"issues": self.state.open_library_issues()}
+
+    def resolve_library_issue(
+        self, issue_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Dismiss an issue, or remove the box it is about."""
+        decision = str(payload.get("decision", ""))
+        issue = self.state.library_issue(issue_id)
+        if issue is None or issue.get("status") != "open":
+            raise ValueError("That library issue is no longer open.")
+        if decision == "dismiss":
+            self.state.settle_library_issue(issue_id, "dismissed")
+            return {"removed": False, **self.library_issues()}
+        if decision != "remove":
+            raise ValueError("Choose whether to remove the box or keep it.")
+
+        rect = payload.get("rect")
+        person = str(payload.get("person") or "")
+        if not isinstance(rect, list) or len(rect) != 4 or not person:
+            raise ValueError("Say which box to remove.")
+        if not any(
+            str(box.get("person")) == person
+            and [round(v, 6) for v in box.get("rect", [])] == [round(float(v), 6) for v in rect]
+            for box in issue.get("boxes", [])
+        ):
+            raise ValueError("That box is not one of the ones in question.")
+
+        settings = self.settings.load()
+        database = str(settings.get("digikam_db") or "")
+        if not database:
+            raise ValueError("Complete the connection setup first.")
+        if digikam_is_running() or not digikam_database_is_free(database):
+            raise ValueError(
+                "Close digiKam before removing a face box, so it does not "
+                "put it back when it next saves."
+            )
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        create_sqlite_backup(
+            database, self.settings.root / "backups" / f"digikam4-library-{timestamp}.db"
+        )
+        with DigikamWriter(database) as writer:
+            outcome = writer.remove_face(
+                str(issue["path"]), person, tuple(float(v) for v in rect),
+                image_id=issue.get("image_id"),
+            )
+        if outcome.get("changed"):
+            LOG.info("Removed a %s face box from %s", person, issue["path"])
+        # Re-check rather than assume: removing one box can settle a second
+        # issue about the same photo, and can leave one that is still wrong.
+        self.check_library()
+        return {"removed": bool(outcome.get("changed")), **self.library_issues()}
+
+    def library_issue_photo(self, issue_id: int) -> tuple[bytes, str]:
+        issue = self.state.library_issue(issue_id)
+        if issue is None:
+            raise ValueError("That library issue is no longer open.")
+        return self._review_photo(issue, "library issue")
+
     def notifications_delivered(self, payload: dict[str, Any]) -> dict[str, Any]:
         raw = payload.get("ids")
         if not isinstance(raw, list):
@@ -496,6 +584,10 @@ class AppService:
         scope, person = self._preview_selection(payload)
         trigger = str(payload.get("trigger") or "manual")
         auto_apply = payload.get("auto_apply") is True
+        # Look at the library before reconciling it. A box in the wrong place
+        # is not a disagreement to settle, and syncing it faithfully copies
+        # the mistake. Nobody is stopped from syncing over it.
+        self.check_library(notify_on_new=trigger != "manual")
         with self._job_lock:
             active = [run_id for run_id, thread in self._jobs.items() if thread.is_alive()]
             if active:

@@ -382,6 +382,59 @@ class DigikamWriter:
             self.conn.rollback()
             raise
 
+    def remove_face(
+        self, path: str, person: str, rect: tuple[float, float, float, float],
+        *, image_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Take one face rectangle out, and only that one.
+
+        Matched on the stored value rather than on a fresh rendering of the
+        rectangle, so a rounding difference can never delete the neighbour.
+        The person keeps the tag if they still have another face here.
+        """
+        try:
+            self.conn.execute("BEGIN IMMEDIATE")
+            image = self._image(path, image_id)
+            wanted = Rect(*map(float, rect)).clamp()
+            candidates = [
+                face for face in self._face_rows(image)
+                if person_names_match(str(face["row"]["person"] or ""), person)
+            ]
+            best = max(candidates, key=lambda face: face["rect"].iou(wanted), default=None)
+            if best is None or best["rect"].iou(wanted) < 0.9:
+                # Already gone, or moved by whoever was here first.
+                self.conn.commit()
+                return {"changed": False, "digikam_image_id": int(image["image_id"])}
+            tag_id = int(best["row"]["tagid"])
+            self.conn.execute(
+                """DELETE FROM ImageTagProperties
+                   WHERE imageid = ? AND tagid = ?
+                     AND property IN ('tagRegion', 'faceToTrain') AND value = ?""",
+                (int(image["image_id"]), tag_id, str(best["row"]["value"])),
+            )
+            left = self.conn.execute(
+                """SELECT COUNT(*) FROM ImageTagProperties
+                   WHERE imageid = ? AND tagid = ? AND property = 'tagRegion'""",
+                (int(image["image_id"]), tag_id),
+            ).fetchone()[0]
+            if not left:
+                # That was their only face here, so the photo is no longer
+                # theirs either.
+                self.conn.execute(
+                    "DELETE FROM ImageTags WHERE imageid = ? AND tagid = ?",
+                    (int(image["image_id"]), tag_id),
+                )
+            self.conn.commit()
+            return {
+                "changed": True,
+                "digikam_image_id": int(image["image_id"]),
+                "digikam_tag_id": tag_id,
+                "faces_left": int(left),
+            }
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def move_face(
         self, path: str, person: str, was: tuple[float, float, float, float],
         now: tuple[float, float, float, float], *, image_id: int | None = None,

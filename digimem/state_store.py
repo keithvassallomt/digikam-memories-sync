@@ -48,6 +48,19 @@ CREATE TABLE IF NOT EXISTS conflicts (
     resolution TEXT,
     detail_json TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS library_issues (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    identity_key TEXT NOT NULL UNIQUE,
+    path TEXT NOT NULL,
+    image_id INTEGER,
+    person TEXT NOT NULL DEFAULT '',
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'open',
+    first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TEXT
+);
+CREATE INDEX IF NOT EXISTS library_issues_status ON library_issues(status, path);
 CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY,
     run_id INTEGER REFERENCES runs(id),
@@ -1230,6 +1243,87 @@ class StateStore:
             self.conn.commit()
         return removed
 
+    # ------------------------------------------------------- library issues
+
+    def save_library_issues(self, issues: list[dict[str, Any]]) -> dict[str, int]:
+        """Record what a scan found, without re-asking a settled question.
+
+        An issue already dismissed stays dismissed: the whole point of saying
+        "this is fine" is that the next scan does not bring it back. One that
+        is no longer found has been fixed, in here or in digiKam, so it closes.
+        """
+        seen = {str(issue["identity"]): issue for issue in issues}
+        added = 0
+        with self.lock:
+            known = {
+                str(row["identity_key"]): str(row["status"])
+                for row in self.conn.execute(
+                    "SELECT identity_key, status FROM library_issues"
+                )
+            }
+            for identity, issue in seen.items():
+                detail = json.dumps(issue)
+                if identity in known:
+                    self.conn.execute(
+                        """UPDATE library_issues
+                           SET detail_json = ?, last_seen_at = CURRENT_TIMESTAMP
+                           WHERE identity_key = ?""",
+                        (detail, identity),
+                    )
+                    continue
+                self.conn.execute(
+                    """INSERT INTO library_issues(
+                           kind, identity_key, path, image_id, person,
+                           detail_json, last_seen_at)
+                       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                    (
+                        str(issue["kind"]), identity, str(issue["path"]),
+                        int(issue["image_id"]), str(issue["person"]), detail,
+                    ),
+                )
+                added += 1
+            placeholders = ",".join("?" for _ in seen) or "''"
+            closed = self.conn.execute(
+                f"""UPDATE library_issues SET status = 'resolved'
+                    WHERE status = 'open' AND identity_key NOT IN ({placeholders})""",
+                list(seen),
+            ).rowcount
+            self.conn.commit()
+        return {"added": added, "closed": int(closed or 0), "open": len(seen)}
+
+    def open_library_issues(self) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = self.conn.execute(
+                """SELECT id, kind, path, person, detail_json FROM library_issues
+                   WHERE status = 'open' ORDER BY path, person"""
+            ).fetchall()
+        return [
+            {"id": int(row["id"]), **json.loads(row["detail_json"])} for row in rows
+        ]
+
+    def library_issue(self, issue_id: int) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT id, status, detail_json FROM library_issues WHERE id = ?",
+                (issue_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row["id"]),
+            "status": str(row["status"]),
+            **json.loads(row["detail_json"]),
+        }
+
+    def settle_library_issue(self, issue_id: int, status: str) -> None:
+        if status not in {"dismissed", "resolved"}:
+            raise ValueError("An issue is either dismissed or resolved.")
+        with self.lock:
+            self.conn.execute(
+                "UPDATE library_issues SET status = ? WHERE id = ?", (status, issue_id)
+            )
+            self.conn.commit()
+
     def action(self, action_id: int) -> dict[str, Any] | None:
         """One journalled change, with its action decoded."""
         with self.lock:
@@ -1784,12 +1878,15 @@ class StateStore:
         """Everything waiting on a person, across every run."""
         conflicts = self.open_conflicts()
         failures = self.reviewable_failures()
+        issues = self.open_library_issues()
         return {
             "conflicts": conflicts,
             "failures": failures,
+            "issues": issues,
             "conflict_count": len(conflicts),
             "failure_count": len(failures),
-            "total": len(conflicts) + len(failures),
+            "issue_count": len(issues),
+            "total": len(conflicts) + len(failures) + len(issues),
         }
 
     def attention_counts(self) -> dict[str, int]:
@@ -1808,10 +1905,16 @@ class StateStore:
                        AND operation IN ('insert_memories', 'create_digikam')"""
                 ).fetchone()[0]
             )
+            issues = int(
+                self.conn.execute(
+                    "SELECT COUNT(*) FROM library_issues WHERE status = 'open'"
+                ).fetchone()[0]
+            )
         return {
             "conflicts": conflicts,
             "failures": failures,
-            "total": conflicts + failures,
+            "issues": issues,
+            "total": conflicts + failures + issues,
         }
 
     # -------------------------------------------------------- notifications

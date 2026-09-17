@@ -11,6 +11,7 @@ import { create as createAttention } from './views/attention.js';
 import { create as createConflict } from './views/conflict.js';
 import { create as createFailure } from './views/failure.js';
 import { create as createHome } from './views/home.js';
+import { create as createLibrary } from './views/library.js';
 import { create as createLogs } from './views/logs.js';
 import { create as createRun } from './views/run.js';
 import { create as createSettings } from './views/settings.js';
@@ -23,13 +24,17 @@ const VIEWS = {
   attention: createAttention,
   conflict: createConflict,
   failure: createFailure,
+  library: createLibrary,
   logs: createLogs,
   settings: createSettings,
   setup: createSetup,
 };
 
 // Which rail entry lights up for a screen that is not itself in the rail.
-const RAIL_PARENT = { run: 'activity', conflict: 'attention', failure: 'attention' };
+const RAIL_PARENT = {
+  run: 'activity', conflict: 'attention', failure: 'attention',
+  library: 'attention',
+};
 
 const TOPBAR = {
   setup: ['is-off', 'Setup needed'],
@@ -48,6 +53,7 @@ router.define('/runs/:id', 'run');
 router.define('/attention', 'attention');
 router.define('/attention/conflicts', 'conflict');
 router.define('/attention/failures', 'failure');
+router.define('/attention/library', 'library');
 router.define('/logs', 'logs');
 router.define('/settings', 'settings');
 router.define('/setup', 'setup');

@@ -85,6 +85,12 @@ class DigiMemHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, self.server.app.status(self._client_hint()))
         elif path == "/api/attention":
             self._json(HTTPStatus.OK, self.server.app.attention())
+        elif path == "/api/library/issues":
+            self._json(HTTPStatus.OK, self.server.app.library_issues())
+        elif path.startswith("/api/library/issues/") and path.endswith("/photo"):
+            issue_id = int(path.strip("/").split("/")[3])
+            body, content_type = self.server.app.library_issue_photo(issue_id)
+            self._bytes(HTTPStatus.OK, body, content_type)
         elif path == "/api/runs":
             query = parse_qs(urlparse(self.path).query)
             try:
@@ -168,6 +174,12 @@ class DigiMemHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.server.app.notifications_delivered(payload))
             elif path == "/api/notifications/read":
                 self._json(HTTPStatus.OK, self.server.app.mark_notifications_read(payload))
+            elif path.startswith("/api/library/issues/"):
+                issue_id = int(path.strip("/").split("/")[3])
+                self._json(
+                    HTTPStatus.OK,
+                    self.server.app.resolve_library_issue(issue_id, payload),
+                )
             elif path == "/api/settings/sync":
                 self._json(HTTPStatus.OK, self.server.app.update_sync(payload))
             elif path == "/api/settings/automation":
