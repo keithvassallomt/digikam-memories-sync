@@ -33,8 +33,9 @@ chmod +x DigiMem-{{VERSION}}-x86_64.AppImage
 ```
 
 The AppImage carries its own Python and needs nothing installed. It is built
-against glibc 2.28, so it runs on anything from roughly Debian 10, Ubuntu 20.04
-or RHEL 8 onwards.
+against glibc 2.35, so it runs on Ubuntu 22.04, Debian 12 and Fedora 36
+onwards. On anything older, use the `.deb` or `.rpm` — they bundle no
+interpreter and so have no such floor.
 
 Then add DigiMem to your application menu and, if you want it, to your login
 items:
@@ -46,11 +47,10 @@ digimem autostart enable
 
 ### macOS
 
-1. Download the disk image for your Mac:
-   - Apple Silicon (M1 and later) — `DigiMem-{{VERSION}}-arm64.dmg`
-   - Intel — `DigiMem-{{VERSION}}-x86_64.dmg`
-2. Open it and drag **DigiMem** to Applications.
-3. Launch it from Applications or Spotlight.
+1. Open `DigiMem-{{VERSION}}-arm64.dmg` and drag **DigiMem** to Applications.
+2. Launch it from Applications or Spotlight.
+
+Apple Silicon only (M1 and later). There is no Intel build.
 
 The app is signed with an Apple Developer ID and notarised by Apple, so it
 opens without any warning or right-click workaround.
