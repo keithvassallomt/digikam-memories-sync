@@ -5,11 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from digikam_nextcloud import ledger as ledger_module
-from digikam_nextcloud.constants import ASK
-from digikam_nextcloud.apply import build_apply_plan, conflict_preview_actions
-from digikam_nextcloud.ledger import NullLedger, StateLedger
-from digikam_nextcloud.models import (
+from digimem import ledger as ledger_module
+from digimem.constants import ASK
+from digimem.apply import build_apply_plan, conflict_preview_actions
+from digimem.ledger import NullLedger, StateLedger
+from digimem.models import (
     DigikamImage,
     FaceRegion,
     FileMatch,
@@ -17,8 +17,8 @@ from digikam_nextcloud.models import (
     Rect,
     SyncReport,
 )
-from digikam_nextcloud.state_store import StateStore
-from digikam_nextcloud.sync import _process_match
+from digimem.state_store import StateStore
+from digimem.sync import _process_match
 
 BOX = Rect(0.1, 0.1, 0.2, 0.2)
 

@@ -1,4 +1,4 @@
-# digiKam ↔ Memories Face Sync
+# DigiMem
 
 This project reconciles face names and rectangles between a local digiKam
 library and Nextcloud Memories/Recognize.
@@ -11,7 +11,7 @@ can resume without repeating completed changes.
 ## Repository layout
 
 ```text
-digikam_nextcloud/             Python sync engine, service and HTTP client
+digimem/                       Python sync engine, service and HTTP client
   web/                         Browser interface: index.html, css/, js/
   web/js/views/                One module per screen
 tests/                         Python tests
@@ -55,7 +55,7 @@ automatic run will not wait for digiKam. Linux reads `/proc` and needs nothing.
 
 ## Automatic operation
 
-Face Sync can keep both libraries in step without being asked. Turn it on in
+DigiMem can keep both libraries in step without being asked. Turn it on in
 Settings, or at the end of first-run setup.
 
 It watches digiKam's database file and polls Nextcloud every few minutes. A
@@ -67,7 +67,7 @@ It waits for Recognize to finish its own work, and holds digiKam's half of a
 sync until you quit digiKam. Opening digiKam part way through stops the writes
 within a second and the rest waits.
 
-Face Sync remembers the name both libraries last agreed on for each face, so a
+DigiMem remembers the name both libraries last agreed on for each face, so a
 rename in either one is applied to the other rather than queued as a question.
 Only a face renamed on both sides, or one with no history, waits for you.
 
@@ -97,13 +97,13 @@ changes nothing about the other or about disagreements.
 ## Commands
 
 ```bash
-face-sync                          # open the interface, starting the service if needed
-face-sync ui --foreground          # run the service in this terminal instead
-face-sync service                  # run the background service
-face-sync run --config config.yaml # one-off command-line sync
-face-sync autostart enable         # start Face Sync at login
-face-sync shortcuts install        # add it to the application menu
-face-sync service --once           # start up, do one pass, exit (build check)
+digimem                          # open the interface, starting the service if needed
+digimem ui --foreground          # run the service in this terminal instead
+digimem service                  # run the background service
+digimem run --config config.yaml # one-off command-line sync
+digimem autostart enable         # start DigiMem at login
+digimem shortcuts install        # add it to the application menu
+digimem service --once           # start up, do one pass, exit (build check)
 ```
 
 One service owns a configuration directory. It holds `service.lock` so a second
@@ -111,7 +111,7 @@ copy cannot start, and publishes its port and session token in `service.json`
 so the launcher and shortcuts can find it. Starting a second service prints the
 address of the running one and exits with status 3.
 
-The service logs to `logs/face-sync.log` under the configuration directory and
+The service logs to `logs/digimem.log` under the configuration directory and
 to the state database, so the interface can show logs without reading files.
 
 ## The interface
@@ -141,9 +141,9 @@ Recognize update cannot overwrite it. Build its archive with
 `./build-nextcloud-app.sh`, and see `docs/install-nextcloud-app.md` for
 installing it.
 
-Version 0.5.0 adds two read-only endpoints Face Sync polls between syncs: a
+Version 0.5.0 adds two read-only endpoints DigiMem polls between syncs: a
 fingerprint of which person each named face belongs to, and whether Recognize
-is busy. An older version simply leaves change detection off, and Face Sync
+is busy. An older version simply leaves change detection off, and DigiMem
 falls back to its daily check.
 
 The interface implements first-run setup, All/One-person selection, a read-only

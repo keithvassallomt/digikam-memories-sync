@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "digikam-memories-sync"
+name = "digimem"
 version = "0.1.0"
 description = "Two-way face synchronization between digiKam and Nextcloud Memories"
 readme = "README.md"
@@ -24,14 +24,15 @@ desktop = [
 ]
 
 [project.scripts]
-face-sync = "digikam_nextcloud.entrypoint:main"
+digimem = "digimem.entrypoint:main"
 
 [tool.setuptools.packages.find]
-include = ["digikam_nextcloud*"]
+include = ["digimem*"]
 
 [tool.setuptools.package-data]
-digikam_nextcloud = [
+digimem = [
   "web/*.html",
+  "web/*.png",
   "web/css/*.css",
   "web/js/*.js",
   "web/js/views/*.js",

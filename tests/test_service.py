@@ -13,9 +13,9 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud import autostart, shortcuts
-from digikam_nextcloud.log_store import SQLiteLogHandler, run_context
-from digikam_nextcloud.service import (
+from digimem import autostart, shortcuts
+from digimem.log_store import SQLiteLogHandler, run_context
+from digimem.service import (
     EXIT_ALREADY_RUNNING,
     ServiceLock,
     read_service_info,
@@ -24,7 +24,7 @@ from digikam_nextcloud.service import (
     service_is_live,
     write_service_info,
 )
-from digikam_nextcloud.state_store import StateStore
+from digimem.state_store import StateStore
 
 
 def make_digikam_database(path: Path) -> None:
@@ -117,7 +117,7 @@ class RunningServiceTest(unittest.TestCase):
     def get(self, path: str) -> dict:
         request = urllib.request.Request(
             f"http://127.0.0.1:{self.info()['port']}{path}",
-            headers={"X-Face-Sync-Token": self.info()["token"]},
+            headers={"X-DigiMem-Token": self.info()["token"]},
         )
         with urllib.request.urlopen(request, timeout=5) as response:
             return json.loads(response.read())
@@ -138,7 +138,7 @@ class RunningServiceTest(unittest.TestCase):
         caught.exception.close()
 
     def test_logs_reach_the_interface(self) -> None:
-        logging.getLogger("digikam_nextcloud.test").info("a line for the interface")
+        logging.getLogger("digimem.test").info("a line for the interface")
         for handler in logging.getLogger().handlers:
             if isinstance(handler, SQLiteLogHandler):
                 self.assertTrue(handler.flush(), "the log writer did not drain")
@@ -166,7 +166,7 @@ class LogStoreTest(unittest.TestCase):
         self.store = StateStore(Path(self.tmp.name) / "state.sqlite3")
         self.handler = SQLiteLogHandler(self.store)
         self.handler.setFormatter(logging.Formatter("%(message)s"))
-        self.log = logging.getLogger("digikam_nextcloud.logtest")
+        self.log = logging.getLogger("digimem.logtest")
         self.log.handlers = [self.handler]
         self.log.propagate = False
         self.log.setLevel(logging.DEBUG)
@@ -257,14 +257,14 @@ class AutostartTest(unittest.TestCase):
 
     def test_desktop_entry_is_written_when_systemd_is_absent(self) -> None:
         with patch.dict("os.environ", {"XDG_CONFIG_HOME": str(self.home)}), patch(
-            "digikam_nextcloud.autostart._has_systemd", return_value=False
+            "digimem.autostart._has_systemd", return_value=False
         ), patch("sys.platform", "linux"):
             self.assertEqual(autostart.mechanism(), "xdg")
             result = autostart.enable(self.home / "config")
             path = Path(result["path"])
             self.assertTrue(path.is_file())
             body = path.read_text()
-            self.assertIn("digikam_nextcloud", body)
+            self.assertIn("digimem", body)
             self.assertIn("service", body)
             self.assertTrue(autostart.status()["enabled"])
 
@@ -280,22 +280,22 @@ class AutostartTest(unittest.TestCase):
             return 0, ""
 
         with patch.dict("os.environ", {"XDG_CONFIG_HOME": str(self.home)}), patch(
-            "digikam_nextcloud.autostart._has_systemd", return_value=True
+            "digimem.autostart._has_systemd", return_value=True
         ), patch("sys.platform", "linux"), patch(
-            "digikam_nextcloud.autostart._systemctl", side_effect=record
+            "digimem.autostart._systemctl", side_effect=record
         ):
             result = autostart.enable(None)
             unit = Path(result["path"]).read_text()
             self.assertIn("WantedBy=default.target", unit)
             self.assertIn("Restart=on-failure", unit)
-            self.assertIn(("enable", "face-sync.service"), calls)
-            self.assertIn(("start", "face-sync.service"), calls)
+            self.assertIn(("enable", "digimem.service"), calls)
+            self.assertIn(("start", "digimem.service"), calls)
 
     def test_a_refusing_systemd_is_reported(self) -> None:
         with patch.dict("os.environ", {"XDG_CONFIG_HOME": str(self.home)}), patch(
-            "digikam_nextcloud.autostart._has_systemd", return_value=True
+            "digimem.autostart._has_systemd", return_value=True
         ), patch("sys.platform", "linux"), patch(
-            "digikam_nextcloud.autostart._systemctl", return_value=(1, "no session")
+            "digimem.autostart._systemctl", return_value=(1, "no session")
         ):
             with self.assertRaises(RuntimeError):
                 autostart.enable(None)
@@ -306,12 +306,12 @@ class ShortcutTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             "os.environ", {"XDG_DATA_HOME": tmp}
         ), patch("sys.platform", "linux"), patch(
-            "digikam_nextcloud.shortcuts.subprocess.run"
+            "digimem.shortcuts.subprocess.run"
         ):
             result = shortcuts.install(None)
             path = Path(result["path"])
             body = path.read_text()
-            self.assertIn("Name=Face Sync", body)
+            self.assertIn("Name=DigiMem", body)
             self.assertIn('"ui"', body, "the shortcut opens the interface, not the service")
             self.assertNotIn('"service"', body)
             self.assertTrue(shortcuts.status()["installed"])

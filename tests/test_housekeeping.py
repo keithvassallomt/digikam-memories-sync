@@ -8,10 +8,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud import desktop, notify
-from digikam_nextcloud.app_service import AppService
-from digikam_nextcloud.settings import SettingsStore
-from digikam_nextcloud.state_store import StateStore
+from digimem import desktop, notify
+from digimem.app_service import AppService
+from digimem.settings import SettingsStore
+from digimem.state_store import StateStore
 
 NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -21,8 +21,8 @@ class DesktopSenderTest(unittest.TestCase):
 
     def sent(self, platform):
         with patch("sys.platform", platform), \
-             patch("digikam_nextcloud.desktop.shutil.which", return_value="/usr/bin/tool"), \
-             patch("digikam_nextcloud.desktop.subprocess.run") as run:
+             patch("digimem.desktop.shutil.which", return_value="/usr/bin/tool"), \
+             patch("digimem.desktop.subprocess.run") as run:
             run.return_value.returncode = 0
             run.return_value.stderr = ""
             ok = desktop.send("12 faces need a decision", "Two names disagree.")
@@ -33,7 +33,7 @@ class DesktopSenderTest(unittest.TestCase):
         command = self.sent("linux").args[0]
         self.assertEqual(command[0], "notify-send")
         self.assertIn("--app-name", command)
-        self.assertIn("Face Sync", command)
+        self.assertIn("DigiMem", command)
         self.assertEqual(command[-2:], ["12 faces need a decision", "Two names disagree."])
 
     def test_macos_uses_osascript(self):
@@ -49,8 +49,8 @@ class DesktopSenderTest(unittest.TestCase):
 
     def test_quotes_in_a_name_cannot_break_the_command(self):
         with patch("sys.platform", "darwin"), \
-             patch("digikam_nextcloud.desktop.shutil.which", return_value="/usr/bin/osascript"), \
-             patch("digikam_nextcloud.desktop.subprocess.run") as run:
+             patch("digimem.desktop.shutil.which", return_value="/usr/bin/osascript"), \
+             patch("digimem.desktop.subprocess.run") as run:
             run.return_value.returncode = 0
             run.return_value.stderr = ""
             desktop.send('He said "hi"', 'back\\slash')
@@ -60,8 +60,8 @@ class DesktopSenderTest(unittest.TestCase):
 
     def test_a_refusing_platform_is_reported_not_raised(self):
         with patch("sys.platform", "linux"), \
-             patch("digikam_nextcloud.desktop.shutil.which", return_value="/usr/bin/notify-send"), \
-             patch("digikam_nextcloud.desktop.subprocess.run", side_effect=OSError("no bus")):
+             patch("digimem.desktop.shutil.which", return_value="/usr/bin/notify-send"), \
+             patch("digimem.desktop.subprocess.run", side_effect=OSError("no bus")):
             self.assertFalse(desktop.send("title", "body"))
 
     def test_an_empty_title_is_not_shown(self):
@@ -69,8 +69,8 @@ class DesktopSenderTest(unittest.TestCase):
 
     def test_a_connection_problem_is_marked_urgent(self):
         with patch("sys.platform", "linux"), \
-             patch("digikam_nextcloud.desktop.shutil.which", return_value="/usr/bin/notify-send"), \
-             patch("digikam_nextcloud.desktop.subprocess.run") as run:
+             patch("digimem.desktop.shutil.which", return_value="/usr/bin/notify-send"), \
+             patch("digimem.desktop.subprocess.run") as run:
             run.return_value.returncode = 0
             run.return_value.stderr = ""
             desktop.send_notification({
@@ -93,7 +93,7 @@ class ServiceHousekeepingTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def deliver(self):
-        with patch("digikam_nextcloud.desktop.send_notification", return_value=True) as sender:
+        with patch("digimem.desktop.send_notification", return_value=True) as sender:
             count = self.service.deliver_desktop_notifications()
         return count, sender
 
@@ -138,7 +138,7 @@ class ServiceHousekeepingTest(unittest.TestCase):
 
     def test_a_desktop_that_cannot_show_one_does_not_make_it_repeat(self):
         self.state.create_notification("conflicts.created", "12 faces", "…", "/attention")
-        with patch("digikam_nextcloud.desktop.send_notification", return_value=False):
+        with patch("digimem.desktop.send_notification", return_value=False):
             self.service.deliver_desktop_notifications()
         self.assertEqual(self.state.undelivered_notifications(), [])
         self.assertEqual(len(self.state.unread_notifications()), 1,
@@ -222,7 +222,7 @@ class CoordinatorHousekeepingTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def coordinator(self, now):
-        from digikam_nextcloud.coordinator import Coordinator
+        from digimem.coordinator import Coordinator
 
         class App:
             def __init__(self, state):

@@ -188,7 +188,7 @@ clusters and pull their centroids, which can merge two people. Nobody reviews
 them now.
 
 So the effect is at least recorded. The companion app returns the descriptor
-confidence and Face Sync kept throwing it away; an insert result now carries
+confidence and DigiMem kept throwing it away; an insert result now carries
 `score`, where zero means the box was taken as given. Comparing those faces
 against their own cluster's other members is what would show the damage, if
 there is any.

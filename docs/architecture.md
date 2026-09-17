@@ -1,6 +1,6 @@
 # Application architecture
 
-Face Sync keeps face names and rectangles in step between a local digiKam
+DigiMem keeps face names and rectangles in step between a local digiKam
 library and Nextcloud Memories/Recognize, in both directions, on its own.
 
 The phase 2 design document, `phase2.md`, carries the reasoning behind
@@ -8,7 +8,7 @@ automatic operation. This file describes what the parts are and how they fit.
 
 ## Components
 
-- `digikam_nextcloud`: the engine. Matching, the digiKam reader and writer, and
+- `digimem`: the engine. Matching, the digiKam reader and writer, and
   the Nextcloud client. Independent of any interface.
 - `service.py`: the long-running process. One per configuration directory, held
   by an exclusive lock and published in `service.json`.
@@ -30,13 +30,13 @@ automatic operation. This file describes what the parts are and how they fit.
 
 | Command | What it is |
 |---|---|
-| `face-sync service` | The background process |
-| `face-sync ui` | Opens the interface, starting the service if needed |
-| `face-sync run` | One-off command-line sync |
-| `face-sync autostart` | Start at login, on all three platforms |
-| `face-sync shortcuts` | Application-menu entry |
+| `digimem service` | The background process |
+| `digimem ui` | Opens the interface, starting the service if needed |
+| `digimem run` | One-off command-line sync |
+| `digimem autostart` | Start at login, on all three platforms |
+| `digimem shortcuts` | Application-menu entry |
 
-Closing the browser does not stop anything. `face-sync service --once` starts
+Closing the browser does not stop anything. `digimem service --once` starts
 up, does a single pass of work and exits, which is what a build check runs.
 
 ## How a sync happens

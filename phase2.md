@@ -35,8 +35,8 @@ Assumptions that were not questioned and are treated as settled:
 
 **Goals**
 
-1. Both libraries converge on their own. A rename in either library reaches the other without anyone opening Face Sync.
-2. Face Sync only interrupts a person for a real decision: two names disagree, or a face was rejected.
+1. Both libraries converge on their own. A rename in either library reaches the other without anyone opening DigiMem.
+2. DigiMem only interrupts a person for a real decision: two names disagree, or a face was rejected.
 3. An interrupted run resumes where it stopped. Never repeats a completed change. Never applies a stale one.
 4. Everything the service does is visible afterwards: activity, logs, why it is waiting.
 5. Setup happens once. Launching the app lands on a home screen, not a wizard.
@@ -83,7 +83,7 @@ Measured on Keith's library for sizing: WAL journal mode, 19 MB, 23,662 images, 
 
 - **One sentence tells you the state.** The home screen always has a single headline: in sync, syncing, waiting for X, paused, needs you, or broken.
 - **Waiting is not failing.** digiKam open, Recognize busy, laptop offline: these are shown calmly as "waiting for…", with the reason and what will happen next. No red.
-- **Interrupt only for decisions.** Notifications fire for faces needing a decision and for connection problems that persisted. Completed syncs are silent unless the user opts in. When Face Sync is already open and in front of the user, nothing is raised at all: the screen updates instead (section 12.1).
+- **Interrupt only for decisions.** Notifications fire for faces needing a decision and for connection problems that persisted. Completed syncs are silent unless the user opts in. When DigiMem is already open and in front of the user, nothing is raised at all: the screen updates instead (section 12.1).
 - **Never write to digiKam behind its back.** digiKam-side writes happen only while digiKam is closed, and stop the instant it starts.
 - **Manual is a shortcut, not a different mode.** "Sync now" runs the same job the service would run, skipping the quiet period.
 
@@ -97,11 +97,11 @@ Unchanged Connect screen (digiKam folder, Nextcloud address, username, app passw
 │  digiKam  /home/keith/Photos  ✓      Nextcloud  nc.vassallo.cloud ✓│
 │                                                                   │
 │  [x] Keep both libraries in sync automatically                    │
-│      Face Sync checks for changes in the background, waits until  │
+│      DigiMem checks for changes in the background, waits until  │
 │      digiKam is closed before changing it, and only asks you when │
 │      two names disagree.                                          │
 │                                                                   │
-│  [x] Start Face Sync when I log in                                │
+│  [x] Start DigiMem when I log in                                │
 │                                                                   │
 │                                              [ Finish ]           │
 └──────────────────────────────────────────────────────────────────┘
@@ -165,7 +165,7 @@ Grouped, always editable, and verified on save with the same checks as first run
 
 ### 3.10 Shortcuts
 
-"Add to application menu" in Settings installs a `.desktop` file on Linux, a minimal `Face Sync.app` in `~/Applications` on macOS, and a Start Menu shortcut on Windows. All run `face-sync ui`, which opens the browser at the running service, starting the service first if needed.
+"Add to application menu" in Settings installs a `.desktop` file on Linux, a minimal `DigiMem.app` in `~/Applications` on macOS, and a Start Menu shortcut on Windows. All run `digimem ui`, which opens the browser at the running service, starting the service first if needed.
 
 ---
 
@@ -177,7 +177,7 @@ The five-step rail is replaced by a section rail. Setup is not a section. It is 
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│ ◎ Face Sync   digiKam ↔ Memories                     ● Connected      │
+│ ◎ DigiMem   digiKam ↔ Memories                     ● Connected      │
 ├─────────────┬──────────────────────────────────────────────────────────┤
 │ ▸ Home      │                                                          │
 │   Activity  │                                                          │
@@ -378,7 +378,7 @@ Review opens the phase 1 conflict or failure screens unchanged, except that the 
 │    Notify me in this browser            not asked yet   [ Enable ]    │
 │                                                                       │
 │  Background service                                                   │
-│    (●) Start Face Sync when I log in            ● running since 08:01 │
+│    (●) Start DigiMem when I log in            ● running since 08:01 │
 │    [ Add to application menu ]                                        │
 │                                                                       │
 │  Storage                                                              │
@@ -400,14 +400,14 @@ Review opens the phase 1 conflict or failure screens unchanged, except that the 
 
 ### 4.9 Prototype
 
-Built: `docs/prototypes/face-sync-phase2.html`. Nine screens, the eight Home states, both run-detail variants, and the two review screens carried over from phase 1.
+Built: `docs/prototypes/digimem-phase2.html`. Nine screens, the eight Home states, both run-detail variants, and the two review screens carried over from phase 1.
 
-It keeps the phase 1 prototype's conventions: `#face-sync-prototypes` scope, `--fs-*` tokens, `fs-` class names, segmented switcher, `data-screen` sections, no framework and no external assets.
+It keeps the phase 1 prototype's conventions: `#digimem-prototypes` scope, `--fs-*` tokens, `fs-` class names, segmented switcher, `data-screen` sections, no framework and no external assets.
 
-Two deliberate differences from `docs/prototypes/face-sync-ui.html`:
+Two deliberate differences from `docs/prototypes/digimem-ui.html`:
 
 - It is a standalone document with a doctype rather than a fragment, so it opens directly in a browser.
-- Icons are Unicode glyphs (`◎ ▣ ☁ ◌`) as in the shipped `digikam_nextcloud/web/index.html`, not the `data-lucide` placeholders the phase 1 prototype used. Those render blank without the Lucide script, which the no-external-assets rule forbids.
+- Icons are Unicode glyphs (`◎ ▣ ☁ ◌`) as in the shipped `digimem/web/index.html`, not the `data-lucide` placeholders the phase 1 prototype used. Those render blank without the Lucide script, which the no-external-assets rule forbids.
 
 It also adds a light/dark/auto switch above the window, because `light-dark()` otherwise follows the operating system and both themes need reviewing.
 
@@ -421,11 +421,11 @@ What the prototype fakes rather than models: photos are CSS gradients, all count
 
 | Command | Role |
 |---|---|
-| `face-sync service` | The long-running process. Owns the HTTP server, the coordinator, the pollers, the job runner, logging and notifications. Exactly one per config directory. |
-| `face-sync ui` | Launcher used by shortcuts. Finds the running service via `service.json`. If none, starts `face-sync service` detached, waits for health, then opens the browser. |
-| `face-sync run` | Unchanged CLI. Shares the state database read-only for reporting and refuses to write while a service holds the lock. |
-| `face-sync autostart enable/disable` | Same as the Settings toggle, for scripting. |
-| `face-sync shortcuts install` | Same as the Settings button. |
+| `digimem service` | The long-running process. Owns the HTTP server, the coordinator, the pollers, the job runner, logging and notifications. Exactly one per config directory. |
+| `digimem ui` | Launcher used by shortcuts. Finds the running service via `service.json`. If none, starts `digimem service` detached, waits for health, then opens the browser. |
+| `digimem run` | Unchanged CLI. Shares the state database read-only for reporting and refuses to write while a service holds the lock. |
+| `digimem autostart enable/disable` | Same as the Settings toggle, for scripting. |
+| `digimem shortcuts install` | Same as the Settings button. |
 
 Module layout: `service.py` (lifecycle, lock, `service.json`), `launcher.py`, `coordinator.py` (gates and job state machine), `triggers.py` (fingerprints and pollers), `ledger.py` (change attribution), `log_store.py`, `notify.py`, `autostart.py`, `shortcuts.py`. `AppService` keeps its role as the UI-facing facade and grows the new endpoints.
 
@@ -434,17 +434,17 @@ Module layout: `service.py` (lifecycle, lock, `service.json`), `launcher.py`, `c
 - `service.lock` in the config directory, held with `fcntl.flock` on POSIX and `msvcrt.locking` on Windows. A second `service` exits with code 3 and prints the running URL.
 - `service.json` (mode 0600): `{ "pid", "port", "token", "started_at", "version" }`. Written after bind, removed on clean shutdown. Stale files are detected by the lock, not by pid.
 - Port: try the configured port (default 47818), fall back to an ephemeral one. Always bind `127.0.0.1` only.
-- Token: generated per service start, stored in `service.json` so `face-sync ui` can call `/api/health`. Injected into `index.html` as today.
+- Token: generated per service start, stored in `service.json` so `digimem ui` can call `/api/health`. Injected into `index.html` as today.
 
 ### 5.3 Autostart
 
 | Platform | Mechanism | Path |
 |---|---|---|
-| Linux | systemd user unit, `WantedBy=default.target`, `Restart=on-failure`, `RestartSec=10`; falls back to `~/.config/autostart/*.desktop` when systemd user sessions are absent | `~/.config/systemd/user/face-sync.service` |
-| macOS | launchd agent, `RunAtLoad`, `KeepAlive` with `SuccessfulExit=false` | `~/Library/LaunchAgents/com.keithvassallo.face-sync.plist` |
-| Windows | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry running `pythonw -m digikam_nextcloud service` | registry |
+| Linux | systemd user unit, `WantedBy=default.target`, `Restart=on-failure`, `RestartSec=10`; falls back to `~/.config/autostart/*.desktop` when systemd user sessions are absent | `~/.config/systemd/user/digimem.service` |
+| macOS | launchd agent, `RunAtLoad`, `KeepAlive` with `SuccessfulExit=false` | `~/Library/LaunchAgents/com.keithvassallo.digimem.plist` |
+| Windows | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry running `pythonw -m digimem service` | registry |
 
-The unit runs the same interpreter and entry point that installed it (`sys.executable -m digikam_nextcloud service`), so virtualenv installs work. Enabling starts the service immediately; disabling stops it after asking the running instance to finish its current action.
+The unit runs the same interpreter and entry point that installed it (`sys.executable -m digimem service`), so virtualenv installs work. Enabling starts the service immediately; disabling stops it after asking the running instance to finish its current action.
 
 ### 5.4 Shutdown
 
@@ -623,7 +623,7 @@ A person renamed in Memories (cluster title change) shows up as many faces where
 
 ### 8.3 Keeping the ledger complete
 
-Today only applied actions write links. The "already correct" pairs never do, so after phase 1 the ledger covers only faces Face Sync touched. Phase 2:
+Today only applied actions write links. The "already correct" pairs never do, so after phase 1 the ledger covers only faces DigiMem touched. Phase 2:
 
 - Every preview writes or refreshes a ledger row for every matched pair that agrees (`skip` actions carry both ids already). Batched insert, one transaction per scan batch.
 - Every applied action writes its row as today.
@@ -688,7 +688,7 @@ Two routes, both `NoAdminRequired`, both read-only, both under the existing `api
 
 Derived from `oc_jobs` rows whose class starts with `OCA\Recognize\BackgroundJobs\` and whose `reserved_at` is non-zero and younger than 12 hours (Nextcloud clears stale reservations at that age). Busy blocks job start and Memories writes. It does not block digiKam writes.
 
-The capabilities document adds `changeFingerprint: true` and `recognizeStatus: true`. When absent the client degrades: Memories changes are picked up by the fallback interval only, and the Recognize gate is treated as idle. Home notes "Update the Face Sync app in Nextcloud for faster change detection".
+The capabilities document adds `changeFingerprint: true` and `recognizeStatus: true`. When absent the client degrades: Memories changes are picked up by the fallback interval only, and the Recognize gate is treated as idle. Home notes "Update the digiKam Face Sync app in Nextcloud for faster change detection".
 
 ### 9.4 Fallback interval
 
@@ -807,7 +807,7 @@ Existing run, conflict and failure endpoints stay as they are.
 
 ## 11. Logging
 
-- Root logger gets two handlers in service mode: a `RotatingFileHandler` at `<config>/logs/face-sync.log` (5 files × 5 MB) and a `SQLiteLogHandler` writing `log_entries` through a queue so logging never blocks the job thread.
+- Root logger gets two handlers in service mode: a `RotatingFileHandler` at `<config>/logs/digimem.log` (5 files × 5 MB) and a `SQLiteLogHandler` writing `log_entries` through a queue so logging never blocks the job thread.
 - A `contextvars.ContextVar` holds the current run id. The job runner sets it, the handler stamps it, so the Logs page can filter by run and the run detail can show its own tail.
 - Retention: rows older than `retention.log_days` are deleted nightly. `DEBUG` rows older than 3 days are deleted regardless.
 - CLI mode keeps the stderr handler and adds nothing.
@@ -827,7 +827,7 @@ The **browser channel** is a `Notification` raised by the open UI page. The **op
 
 | Situation | Channel | Why |
 |---|---|---|
-| UI open and focused | none | the user is looking at Face Sync, and the attention card and rail badge appear in front of them |
+| UI open and focused | none | the user is looking at DigiMem, and the attention card and rail badge appear in front of them |
 | UI open, not focused, permission granted | browser | one implementation on every platform, and its click behaviour is reliable |
 | UI open, permission refused or unavailable | operating system | the page cannot notify |
 | UI closed | operating system | the only channel there is |
@@ -844,9 +844,9 @@ Without this rule the two channels would both fire and the user would be told tw
 - **Grouping** uses `tag: "<run id>-<category>"`, so a repeated event for the same run replaces its predecessor instead of stacking.
 - **Clicking** focuses the window and navigates to the notification's stored target, which is the run, conflict or failure screen it refers to.
 - **Acknowledgement**: the page posts the ids it raised to `/api/notifications/delivered`, so a row is never raised twice across polls or page reloads.
-- **Zero-permission fallback**: whenever anything is waiting, the page prefixes its document title, as in `(12) Face Sync`. This needs no permission at all and is the only signal some users will ever accept.
+- **Zero-permission fallback**: whenever anything is waiting, the page prefixes its document title, as in `(12) DigiMem`. This needs no permission at all and is the only signal some users will ever accept.
 
-One cosmetic cost is worth knowing before building this. Browsers label a notification with its origin, so this one reads `127.0.0.1:47818` rather than `Face Sync`. Nothing can change that from inside the page. The operating-system channel does show the application name, so the better-looking notification is the one used when the UI is closed. The prototype shows the origin line so the real appearance is not a surprise.
+One cosmetic cost is worth knowing before building this. Browsers label a notification with its origin, so this one reads `127.0.0.1:47818` rather than `DigiMem`. Nothing can change that from inside the page. The operating-system channel does show the application name, so the better-looking notification is the one used when the UI is closed. The prototype shows the origin line so the real appearance is not a surprise.
 
 ### 12.3 Operating-system channel
 
@@ -858,7 +858,7 @@ One cosmetic cost is worth knowing before building this. Browsers label a notifi
 
 Every value is escaped for the shell language it lands in. A person named with an apostrophe or a quotation mark must not be able to change the command that runs.
 
-Click-to-open is **best effort** on this channel and deliberately not relied upon. A `notify-send` callback needs a blocking action listener, `osascript` offers no callback at all, and a Windows toast needs a registered application identity. Since the browser channel covers the case where the user is at the machine with Face Sync already open, the operating-system channel can stay a plain one-way message. A user who clicks a dead notification and opens Face Sync manually still lands on the inbox with everything waiting.
+Click-to-open is **best effort** on this channel and deliberately not relied upon. A `notify-send` callback needs a blocking action listener, `osascript` offers no callback at all, and a Windows toast needs a registered application identity. Since the browser channel covers the case where the user is at the machine with DigiMem already open, the operating-system channel can stay a plain one-way message. A user who clicks a dead notification and opens DigiMem manually still lands on the inbox with everything waiting.
 
 This is the reason section 16 can deliver useful notifications in M2 and leave the three-platform work to M6.
 
@@ -868,8 +868,8 @@ This is the reason section 16 can deliver useful notifications in M2 and leave t
 |---|---|---|
 | `conflicts.created` | 12 faces need a decision | The same face has a different name in each library. |
 | `apply.completed` with rejects | 3 faces could not be added | Memories rejected them. Adjust the box or keep them in digiKam. |
-| `connection.action_required` | Can't reach Nextcloud | Face Sync keeps retrying. Last sync today 09:12. |
-| `connection.action_required` on 401 | Nextcloud rejected the app password | Face Sync has stopped until you update it in Settings. |
+| `connection.action_required` | Can't reach Nextcloud | DigiMem keeps retrying. Last sync today 09:12. |
+| `connection.action_required` on 401 | Nextcloud rejected the app password | DigiMem has stopped until you update it in Settings. |
 | `run.completed` (opt in) | Sync finished | 41 face changes applied. |
 
 Counts are current at the moment of delivery, not at the moment the event was recorded, so a notification that arrives after several runs does not understate the queue.
@@ -891,7 +891,7 @@ Counts are current at the moment of delivery, not at the moment the event was re
 | digiKam process probe | `/proc` scan (existing) plus `psutil` | `psutil` | `psutil` |
 | Manual "Close digiKam" | SIGTERM (existing) | `psutil.terminate()` | `psutil.terminate()` |
 | Autostart | systemd user unit | launchd agent | Run key |
-| Shortcut | `.desktop` in `~/.local/share/applications` | `Face Sync.app` bundle in `~/Applications` | Start Menu `.lnk` |
+| Shortcut | `.desktop` in `~/.local/share/applications` | `DigiMem.app` bundle in `~/Applications` | Start Menu `.lnk` |
 | Notifications | `notify-send` | `osascript` | PowerShell toast |
 | Config directory | `~/.config/digikam-memories-sync` | `~/Library/Application Support/…` | `%APPDATA%\…` |
 
@@ -909,7 +909,7 @@ Counts are current at the moment of delivery, not at the moment the event was re
 - **Conflict identity**: same face across two runs yields one open conflict; externally fixed face closes it.
 - **Fingerprints**: digiKam fingerprint changes on rect edit, on rename, on new region; unchanged on unrelated metadata edits. Companion checksum tested in PHPUnit with a seeded table.
 - **Service**: lock exclusivity, `service.json` lifecycle, launcher start-then-open with a fake browser.
-- **Smoke**: one end-to-end run against the test fixtures through `face-sync service --once`, a flag that runs one coordinator cycle and exits, used by CI.
+- **Smoke**: one end-to-end run against the test fixtures through `digimem service --once`, a flag that runs one coordinator cycle and exits, used by CI.
 
 ---
 
@@ -917,7 +917,7 @@ Counts are current at the moment of delivery, not at the moment the event was re
 
 Each milestone is shippable on its own and leaves phase 1 behaviour intact.
 
-**M1. Service foundation.** `service.py`, lock, `service.json`, `face-sync ui` launcher, autostart install for the three platforms, shortcuts, file and SQLite logging, and the `/api/logs` and `/api/service` endpoints. No change to sync behaviour.
+**M1. Service foundation.** `service.py`, lock, `service.json`, `digimem ui` launcher, autostart install for the three platforms, shortcuts, file and SQLite logging, and the `/api/logs` and `/api/service` endpoints. No change to sync behaviour.
 
 The Logs *page* moves to M2. The shell that would host it is replaced there, and building a sixth entry into a five-step wizard rail would only be thrown away.
 
@@ -954,13 +954,13 @@ Housekeeping does nothing on a service's first day. Deleting backups and logs wi
 
 The prototype stays as it is rather than being replaced by screenshots of the real interface. It is the design record for the flow, it renders both themes on demand, and a screenshot would date faster than the page it replaced.
 
-Done when: a conflict raised with no window open produces one desktop notification; logs and backups are trimmed on schedule; and `face-sync service --once` starts, works and exits.
+Done when: a conflict raised with no window open produces one desktop notification; logs and backups are trimmed on schedule; and `digimem service --once` starts, works and exits.
 
 ---
 
 ## 17. Risks and open points
 
-- **Ledger bootstrap.** The upgrade seeds the ledger from links phase 1 already wrote, so only faces Face Sync never touched can still surface as a conflict once. That is a much smaller set than first assumed, and the risk is correspondingly lower.
+- **Ledger bootstrap.** The upgrade seeds the ledger from links phase 1 already wrote, so only faces DigiMem never touched can still surface as a conflict once. That is a much smaller set than first assumed, and the risk is correspondingly lower.
 - **Fingerprint collisions** are no longer a practical concern on either side: both fingerprints hash the underlying rows rather than summing them. The fallback interval still bounds any miss to one day.
 - **Recognize busy detection** depends on `oc_jobs.reserved_at` semantics, which are stable but undocumented. If Nextcloud changes them the gate degrades to "idle", which is the phase 1 behaviour.
 - **digiKam on another machine** writing to a shared database is invisible to the process probe. The write-lock probe catches an active transaction only. Documented, not solved.

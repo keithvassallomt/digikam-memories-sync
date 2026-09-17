@@ -9,9 +9,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud import fingerprint, triggers
-from digikam_nextcloud.state_store import StateStore
-from digikam_nextcloud.triggers import Pending, TriggerWatcher
+from digimem import fingerprint, triggers
+from digimem.state_store import StateStore
+from digimem.triggers import Pending, TriggerWatcher
 
 NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -270,15 +270,15 @@ class WatcherTest(unittest.TestCase):
 
     def test_digikam_is_not_read_while_it_is_open(self):
         watcher = self.watcher(database="/nonexistent/digikam4.db")
-        with patch("digikam_nextcloud.fingerprint.source_mtime") as mtime:
+        with patch("digimem.fingerprint.source_mtime") as mtime:
             watcher.poll(NOW, digikam_running=True)
             mtime.assert_not_called()
 
     def test_an_unchanged_modification_time_skips_the_hash(self):
         watcher = self.watcher(database="/photos/digikam4.db")
         self.state.set_state("last_digikam_mtime", 1234.0)
-        with patch("digikam_nextcloud.fingerprint.source_mtime", return_value=1234.0), \
-             patch("digikam_nextcloud.fingerprint.read_digikam") as hashed:
+        with patch("digimem.fingerprint.source_mtime", return_value=1234.0), \
+             patch("digimem.fingerprint.read_digikam") as hashed:
             watcher.poll(NOW)
             hashed.assert_not_called()
 

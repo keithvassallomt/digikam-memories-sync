@@ -6,19 +6,19 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud.apply import ApplyExecutor, build_apply_plan, plan_summary
-from digikam_nextcloud.app_service import AppService, is_systemic_apply_failure
-from digikam_nextcloud.digikam_writer import (
+from digimem.apply import ApplyExecutor, build_apply_plan, plan_summary
+from digimem.app_service import AppService, is_systemic_apply_failure
+from digimem.digikam_writer import (
     DigikamWriter,
     create_sqlite_backup,
     digikam_probe_supported,
     digikam_process_ids,
     terminate_digikam,
 )
-from digikam_nextcloud.models import FaceRegion, NextcloudFile, NextcloudRequirements, Rect
-from digikam_nextcloud.nextcloud_http import NextcloudConnectionError
-from digikam_nextcloud.settings import SettingsStore
-from digikam_nextcloud.state_store import StateStore
+from digimem.models import FaceRegion, NextcloudFile, NextcloudRequirements, Rect
+from digimem.nextcloud_http import NextcloudConnectionError
+from digimem.settings import SettingsStore
+from digimem.state_store import StateStore
 
 
 def make_writable_digikam(path: Path) -> None:
@@ -170,11 +170,11 @@ class DigikamWriterTests(unittest.TestCase):
     def test_close_request_uses_sigterm_and_waits_for_exit(self):
         with (
             patch(
-                "digikam_nextcloud.digikam_writer.digikam_process_ids",
+                "digimem.digikam_writer.digikam_process_ids",
                 side_effect=[[42], []],
             ),
-            patch("digikam_nextcloud.digikam_writer.os.kill") as send_signal,
-            patch("digikam_nextcloud.digikam_writer.time.sleep"),
+            patch("digimem.digikam_writer.os.kill") as send_signal,
+            patch("digimem.digikam_writer.time.sleep"),
         ):
             result = terminate_digikam()
         self.assertTrue(result["closed"])
@@ -446,7 +446,7 @@ class ApplyServiceTests(unittest.TestCase):
                 }
                 state.save_result(run_id, result)
                 state.finish_run(run_id, "previewed", result["summary"])
-                with patch("digikam_nextcloud.app_service.digikam_is_running", return_value=False):
+                with patch("digimem.app_service.digikam_is_running", return_value=False):
                     service.start_apply(run_id, {"digikam_closed": True})
                 service._jobs[run_id].join(timeout=3)
                 finished = state.run(run_id)
@@ -557,8 +557,8 @@ class DigikamProbeTests(unittest.TestCase):
     def test_psutil_finds_digikam_where_there_is_no_proc(self):
         fake = FakePsutil({11: "Finder", 22: "digiKam"})
         with (
-            patch("digikam_nextcloud.digikam_writer.sys.platform", "darwin"),
-            patch("digikam_nextcloud.digikam_writer.psutil", fake),
+            patch("digimem.digikam_writer.sys.platform", "darwin"),
+            patch("digimem.digikam_writer.psutil", fake),
         ):
             self.assertTrue(digikam_probe_supported())
             self.assertEqual(digikam_process_ids(), [22])
@@ -566,21 +566,21 @@ class DigikamProbeTests(unittest.TestCase):
     def test_windows_executable_name_matches(self):
         fake = FakePsutil({7: "explorer.exe", 8: "digikam.exe"})
         with (
-            patch("digikam_nextcloud.digikam_writer.sys.platform", "win32"),
-            patch("digikam_nextcloud.digikam_writer.psutil", fake),
+            patch("digimem.digikam_writer.sys.platform", "win32"),
+            patch("digimem.digikam_writer.psutil", fake),
         ):
             self.assertEqual(digikam_process_ids(), [8])
 
     def test_windows_close_goes_through_psutil(self):
         fake = FakePsutil({8: "digikam.exe"})
         with (
-            patch("digikam_nextcloud.digikam_writer.sys.platform", "win32"),
-            patch("digikam_nextcloud.digikam_writer.psutil", fake),
+            patch("digimem.digikam_writer.sys.platform", "win32"),
+            patch("digimem.digikam_writer.psutil", fake),
             patch(
-                "digikam_nextcloud.digikam_writer.digikam_process_ids",
+                "digimem.digikam_writer.digikam_process_ids",
                 side_effect=[[8], []],
             ),
-            patch("digikam_nextcloud.digikam_writer.time.sleep"),
+            patch("digimem.digikam_writer.time.sleep"),
         ):
             result = terminate_digikam()
         self.assertTrue(result["closed"])
@@ -588,9 +588,9 @@ class DigikamProbeTests(unittest.TestCase):
 
     def test_linux_still_reads_proc_without_psutil(self):
         with (
-            patch("digikam_nextcloud.digikam_writer.psutil", None),
+            patch("digimem.digikam_writer.psutil", None),
             patch(
-                "digikam_nextcloud.digikam_writer._process_ids_from_proc",
+                "digimem.digikam_writer._process_ids_from_proc",
                 return_value=[5],
             ),
         ):
@@ -599,8 +599,8 @@ class DigikamProbeTests(unittest.TestCase):
 
     def test_probe_reports_itself_unavailable_rather_than_answering_no(self):
         with (
-            patch("digikam_nextcloud.digikam_writer.sys.platform", "darwin"),
-            patch("digikam_nextcloud.digikam_writer.psutil", None),
+            patch("digimem.digikam_writer.sys.platform", "darwin"),
+            patch("digimem.digikam_writer.psutil", None),
         ):
             self.assertFalse(digikam_probe_supported())
             self.assertEqual(digikam_process_ids(), [])

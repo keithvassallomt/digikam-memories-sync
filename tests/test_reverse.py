@@ -4,8 +4,8 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from digikam_nextcloud.digikam import DigikamDB
-from digikam_nextcloud.models import (
+from digimem.digikam import DigikamDB
+from digimem.models import (
     DigikamImage,
     FaceRegion,
     NextcloudFile,
@@ -13,7 +13,7 @@ from digikam_nextcloud.models import (
     Rect,
     SyncReport,
 )
-from digikam_nextcloud.reverse import (
+from digimem.reverse import (
     compare_memories_to_digikam,
     selected_memories_faces,
 )

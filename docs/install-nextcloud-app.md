@@ -1,4 +1,4 @@
-# Installing the Face Sync app in Nextcloud
+# Installing the digiKam Face Sync app in Nextcloud
 
 For version 0.5.0, which adds change detection. Written for a Nextcloud running
 in Docker inside an LXC container, reached by SSH to the container.
@@ -122,7 +122,7 @@ docker exec "$NC" sh -c "rm -rf $APPS/digikam_face_sync && mv $APPS/digikam_face
 docker exec -u www-data "$NC" php occ app:enable digikam_face_sync
 ```
 
-Face Sync detects the older app and turns change detection off by itself,
+DigiMem detects the older app and turns change detection off by itself,
 falling back to the daily check. Nothing breaks.
 
 ## Then, on the desktop side
@@ -133,10 +133,10 @@ git checkout phase-2
 python -m pip install -e .
 
 # Stop any running service first, then:
-face-sync service
+digimem service
 ```
 
-In the interface, open Settings and turn Automatic sync on. Face Sync checks
+In the interface, open Settings and turn Automatic sync on. DigiMem checks
 Nextcloud every 5 minutes and your digiKam library whenever its file changes,
 waits 10 minutes after the last change, and syncs. It waits for Recognize to
 finish, and holds digiKam changes until you quit digiKam.
@@ -144,7 +144,7 @@ finish, and holds digiKam changes until you quit digiKam.
 To see it working, watch the Logs page, or:
 
 ```bash
-tail -f ~/.config/digikam-memories-sync/logs/face-sync.log
+tail -f ~/.config/digikam-memories-sync/logs/digimem.log
 ```
 
 ## If something looks wrong

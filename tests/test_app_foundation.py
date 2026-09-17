@@ -9,13 +9,13 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud.app_service import AppService, resolve_digikam_database
-from digikam_nextcloud.local_server import FaceSyncHTTPServer
-from digikam_nextcloud.models import NextcloudRequirements
-from digikam_nextcloud.models import RegionConflict, SyncReport
-from digikam_nextcloud.nextcloud_http import NextcloudConnectionError
-from digikam_nextcloud.settings import SettingsStore
-from digikam_nextcloud.state_store import StateStore
+from digimem.app_service import AppService, resolve_digikam_database
+from digimem.local_server import DigiMemHTTPServer
+from digimem.models import NextcloudRequirements
+from digimem.models import RegionConflict, SyncReport
+from digimem.nextcloud_http import NextcloudConnectionError
+from digimem.settings import SettingsStore
+from digimem.state_store import StateStore
 
 
 def make_digikam_database(path: Path) -> None:
@@ -138,7 +138,7 @@ class AppFoundationTests(unittest.TestCase):
             self.assertEqual(recovered["status"], "failed")
             self.assertEqual(
                 recovered["error"],
-                "Face Sync stopped before the preview finished.",
+                "DigiMem stopped before the preview finished.",
             )
             self.assertIsNone(state.latest_actionable_run())
         finally:
@@ -243,7 +243,7 @@ class AppFoundationTests(unittest.TestCase):
             )
             heic_id = state.conflicts_for_run(heic_run)["conflicts"][0]["id"]
             with patch(
-                "digikam_nextcloud.app_service.fetch_file_preview",
+                "digimem.app_service.fetch_file_preview",
                 return_value=(b"jpeg-preview", "image/jpeg"),
             ) as fetch_preview:
                 body, content_type = service.conflict_photo(heic_run, heic_id)
@@ -281,7 +281,7 @@ class AppFoundationTests(unittest.TestCase):
         settings = SettingsStore(self.root / "config", use_keyring=False)
         state = StateStore(self.root / "state.sqlite3")
         service = AppService(settings, state)
-        server = FaceSyncHTTPServer(("127.0.0.1", 0), service)
+        server = DigiMemHTTPServer(("127.0.0.1", 0), service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         url = f"http://127.0.0.1:{server.server_port}/api/health"
@@ -292,7 +292,7 @@ class AppFoundationTests(unittest.TestCase):
             denied.exception.close()
 
             request = urllib.request.Request(
-                url, headers={"X-Face-Sync-Token": server.api_token}
+                url, headers={"X-DigiMem-Token": server.api_token}
             )
             with urllib.request.urlopen(request) as response:
                 self.assertEqual(json.load(response), {"status": "ok"})
@@ -319,12 +319,12 @@ class AppFoundationTests(unittest.TestCase):
             raise NextcloudConnectionError("Nextcloud is temporarily unavailable.")
 
         service = AppService(settings, state, backend_factory=unavailable_backend)
-        server = FaceSyncHTTPServer(("127.0.0.1", 0), service)
+        server = DigiMemHTTPServer(("127.0.0.1", 0), service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         url = f"http://127.0.0.1:{server.server_port}/api/people"
         request = urllib.request.Request(
-            url, headers={"X-Face-Sync-Token": server.api_token}
+            url, headers={"X-DigiMem-Token": server.api_token}
         )
         try:
             with self.assertRaises(urllib.error.HTTPError) as denied:
@@ -374,11 +374,11 @@ class AppFoundationTests(unittest.TestCase):
             ],
         )
         service = AppService(settings, state)
-        server = FaceSyncHTTPServer(("127.0.0.1", 0), service)
+        server = DigiMemHTTPServer(("127.0.0.1", 0), service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         base = f"http://127.0.0.1:{server.server_port}/api/runs/{run_id}/conflicts"
-        headers = {"X-Face-Sync-Token": server.api_token}
+        headers = {"X-DigiMem-Token": server.api_token}
         try:
             request = urllib.request.Request(base, headers=headers)
             with urllib.request.urlopen(request) as response:
@@ -441,11 +441,11 @@ class AppFoundationTests(unittest.TestCase):
         state.finish_apply_action(failed["id"], "failed", error="No face found")
         state.finish_apply(run_id, "apply_failed")
         service = AppService(settings, state)
-        server = FaceSyncHTTPServer(("127.0.0.1", 0), service)
+        server = DigiMemHTTPServer(("127.0.0.1", 0), service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         base = f"http://127.0.0.1:{server.server_port}/api/runs/{run_id}/failures"
-        headers = {"X-Face-Sync-Token": server.api_token}
+        headers = {"X-DigiMem-Token": server.api_token}
         try:
             with urllib.request.urlopen(urllib.request.Request(base, headers=headers)) as response:
                 listing = json.load(response)

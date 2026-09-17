@@ -7,11 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud import status as status_module
-from digikam_nextcloud.app_service import AppService
-from digikam_nextcloud.apply import build_apply_plan
-from digikam_nextcloud.settings import SettingsStore
-from digikam_nextcloud.state_store import StateStore
+from digimem import status as status_module
+from digimem.app_service import AppService
+from digimem.apply import build_apply_plan
+from digimem.settings import SettingsStore
+from digimem.state_store import StateStore
 
 REJECTED = "Recognize face-import failed (HTTP 422): No face found inside the supplied rectangle"
 
@@ -252,7 +252,7 @@ class PartlyAppliedHomeTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def status(self):
-        with patch("digikam_nextcloud.app_service.digikam_is_running", return_value=False):
+        with patch("digimem.app_service.digikam_is_running", return_value=False):
             self.service._cache.clear()
             return self.service.status({})
 

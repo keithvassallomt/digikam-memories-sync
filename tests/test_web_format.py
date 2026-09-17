@@ -13,7 +13,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-MODULE = Path(__file__).resolve().parents[1] / "digikam_nextcloud" / "web" / "js" / "format.js"
+MODULE = Path(__file__).resolve().parents[1] / "digimem" / "web" / "js" / "format.js"
 
 
 def run_js(body: str) -> dict:

@@ -9,10 +9,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud import notify, status as status_module
-from digikam_nextcloud.app_service import AppService
-from digikam_nextcloud.settings import SettingsStore
-from digikam_nextcloud.state_store import StateStore
+from digimem import notify, status as status_module
+from digimem.app_service import AppService
+from digimem.settings import SettingsStore
+from digimem.state_store import StateStore
 
 
 def make_digikam_database(path: Path) -> None:
@@ -154,7 +154,7 @@ class ServiceLayerTest(unittest.TestCase):
         )
 
     def status(self, **client: object) -> dict:
-        with patch("digikam_nextcloud.app_service.digikam_is_running", return_value=False):
+        with patch("digimem.app_service.digikam_is_running", return_value=False):
             self.service._cache.clear()
             return self.service.status(client)
 
@@ -186,7 +186,7 @@ class ServiceLayerTest(unittest.TestCase):
         self.configure()
         run_id = self.state.create_run("all")
         self.state.finish_run(run_id, "previewed", {"created_in_digikam": 31})
-        with patch("digikam_nextcloud.app_service.digikam_is_running", return_value=True):
+        with patch("digimem.app_service.digikam_is_running", return_value=True):
             self.service._cache.clear()
             self.assertEqual(self.service.status({})["state"], status_module.WAITING_DIGIKAM)
 

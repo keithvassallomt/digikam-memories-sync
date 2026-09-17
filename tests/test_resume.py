@@ -8,12 +8,12 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud import checkpoint as checkpoint_module
-from digikam_nextcloud.app_service import AppService
-from digikam_nextcloud.checkpoint import StateCheckpoint
-from digikam_nextcloud.models import RegionAction, RegionConflict, Rect, SyncReport
-from digikam_nextcloud.settings import SettingsStore
-from digikam_nextcloud.state_store import StateStore
+from digimem import checkpoint as checkpoint_module
+from digimem.app_service import AppService
+from digimem.checkpoint import StateCheckpoint
+from digimem.models import RegionAction, RegionConflict, Rect, SyncReport
+from digimem.settings import SettingsStore
+from digimem.state_store import StateStore
 
 
 def make_digikam_database(path: Path) -> None:
@@ -82,7 +82,7 @@ class CheckpointTest(unittest.TestCase):
     def test_a_face_reported_by_both_passes_is_counted_once(self):
         """Both passes look at every matched pair, and the list between them
         gets emptied. The count has to survive that."""
-        from digikam_nextcloud.sync import _record_conflict
+        from digimem.sync import _record_conflict
 
         report = SyncReport()
         _record_conflict(report, self.conflict(), max_conflicts=100)
@@ -99,7 +99,7 @@ class CheckpointTest(unittest.TestCase):
             "the same disagreement must not be counted twice")
 
     def test_different_faces_are_still_counted_separately(self):
-        from digikam_nextcloud.sync import _record_conflict
+        from digimem.sync import _record_conflict
 
         report = SyncReport()
         _record_conflict(report, self.conflict(detection_id=2), max_conflicts=100)
@@ -146,7 +146,7 @@ class CheckpointTest(unittest.TestCase):
         self.assertEqual(len(report.actions), 1, "nothing was silently dropped")
 
     def test_the_cap_counts_the_whole_run_not_the_list_in_memory(self):
-        from digikam_nextcloud.sync import _record_action
+        from digimem.sync import _record_action
 
         report = SyncReport()
         sink = StateCheckpoint(self.state, self.run_id)
@@ -196,7 +196,7 @@ class ResumePreviewTest(unittest.TestCase):
                 pass
 
             def connection_requirements(self):
-                from digikam_nextcloud.models import NextcloudRequirements
+                from digimem.models import NextcloudRequirements
                 return NextcloudRequirements(True, True, "")
 
             def list_named_faces(self, person=None, **kwargs):
@@ -336,12 +336,12 @@ class DeferApplyTest(unittest.TestCase):
             def close(self):
                 pass
 
-        with patch("digikam_nextcloud.app_service.DigikamWriter", FakeWriter), \
-             patch("digikam_nextcloud.app_service.digikam_is_running",
+        with patch("digimem.app_service.DigikamWriter", FakeWriter), \
+             patch("digimem.app_service.digikam_is_running",
                    return_value=digikam_running), \
-             patch("digikam_nextcloud.app_service.digikam_database_is_free",
+             patch("digimem.app_service.digikam_database_is_free",
                    return_value=database_free), \
-             patch("digikam_nextcloud.app_service.create_sqlite_backup",
+             patch("digimem.app_service.create_sqlite_backup",
                    return_value=self.root / "backup.db"):
             self.service._cache.clear()
             self.service._apply_job(self.run_id)

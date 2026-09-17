@@ -1,7 +1,7 @@
 import unittest
 
-from digikam_nextcloud.constants import ASK
-from digikam_nextcloud.models import (
+from digimem.constants import ASK
+from digimem.models import (
     DigikamImage,
     FaceRegion,
     FileMatch,
@@ -9,7 +9,7 @@ from digikam_nextcloud.models import (
     Rect,
     SyncReport,
 )
-from digikam_nextcloud.sync import _process_match
+from digimem.sync import _process_match
 
 
 class DuplicateFacePreviewTests(unittest.TestCase):

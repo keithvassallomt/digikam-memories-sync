@@ -1,6 +1,6 @@
 import unittest
 
-from digikam_nextcloud.geometry import displayed_dimensions, parse_tag_region
+from digimem.geometry import displayed_dimensions, parse_tag_region
 
 
 class DisplayedDimensionsTests(unittest.TestCase):

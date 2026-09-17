@@ -2,8 +2,8 @@ import json
 import unittest
 from urllib.parse import parse_qs, urlparse
 
-from digikam_nextcloud.models import FaceRegion, NextcloudFile, Rect
-from digikam_nextcloud.nextcloud_http import (
+from digimem.models import FaceRegion, NextcloudFile, Rect
+from digimem.nextcloud_http import (
     FACE_SYNC_APP_INSTALL_URL,
     NextcloudConnectionError,
     NextcloudHTTP,

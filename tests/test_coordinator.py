@@ -7,9 +7,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from digikam_nextcloud import coordinator as coord
-from digikam_nextcloud.coordinator import Coordinator, Snapshot, choose
-from digikam_nextcloud.state_store import StateStore
+from digimem import coordinator as coord
+from digimem.coordinator import Coordinator, Snapshot, choose
+from digimem.state_store import StateStore
 
 NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
 

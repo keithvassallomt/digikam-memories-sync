@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import unittest
 
-from digikam_nextcloud.constants import ASK, TRUST_DIGIKAM, TRUST_MEMORIES
-from digikam_nextcloud.models import (
+from digimem.constants import ASK, TRUST_DIGIKAM, TRUST_MEMORIES
+from digimem.models import (
     DigikamImage,
     FaceRegion,
     FileMatch,
@@ -12,7 +12,7 @@ from digikam_nextcloud.models import (
     Rect,
     SyncReport,
 )
-from digikam_nextcloud.sync import _process_match
+from digimem.sync import _process_match
 
 
 def disagreeing_pair():
@@ -102,7 +102,7 @@ class TrustOneLibraryTest(unittest.TestCase):
     def test_the_summary_still_adds_up(self):
         """build_apply_plan refuses a preview whose counters and actions
         disagree, so each policy has to count what it recorded."""
-        from digikam_nextcloud.apply import MUTATION_ACTIONS
+        from digimem.apply import MUTATION_ACTIONS
         for policy in (ASK, TRUST_DIGIKAM, TRUST_MEMORIES):
             with self.subTest(policy=policy):
                 report = run(policy)
