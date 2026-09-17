@@ -237,6 +237,36 @@ class LibraryIssueServiceTest(unittest.TestCase):
             self.service._library_backup(str(self.database))
         taken.assert_not_called()
 
+    def test_a_format_the_browser_cannot_draw_is_looked_up_in_nextcloud(self):
+        """A library issue is found in digiKam alone, so it has no Nextcloud
+        file id of its own. Two thirds of the ones here are HEIC."""
+        self.service.check_library()
+        issue = self.only_issue()
+        heic = {**issue, "path": "2026/photo.heic"}
+        (self.settings.root.parent / "2026").mkdir(parents=True, exist_ok=True)
+        (self.settings.root.parent / "2026" / "photo.heic").write_bytes(b"not really")
+        with patch.object(self.service, "_nextcloud_file_id", return_value=4242) as lookup, \
+                patch("digimem.app_service.fetch_file_preview",
+                      return_value=(b"jpeg", "image/jpeg")) as preview, \
+                patch.object(self.service.state, "library_issue", return_value=heic):
+            body, content_type = self.service.library_issue_photo(issue["id"])
+        lookup.assert_called_once()
+        self.assertEqual((body, content_type), (b"jpeg", "image/jpeg"))
+        self.assertEqual(preview.call_args.args[3], 4242, "the id it found is the one used")
+
+    def test_a_photo_nextcloud_does_not_have_says_so(self):
+        """Rather than dropping the connection, which a page can only report
+        as a network error with nothing to explain it."""
+        self.service.check_library()
+        issue = self.only_issue()
+        heic = {**issue, "path": "2026/photo.heic"}
+        (self.settings.root.parent / "2026").mkdir(parents=True, exist_ok=True)
+        (self.settings.root.parent / "2026" / "photo.heic").write_bytes(b"not really")
+        with patch.object(self.service, "_nextcloud_file_id", return_value=None), \
+                patch.object(self.service.state, "library_issue", return_value=heic):
+            with self.assertRaisesRegex(ValueError, "preview is unavailable"):
+                self.service.library_issue_photo(issue["id"])
+
     def test_issues_reach_the_attention_inbox(self):
         self.service.check_library()
         inbox = self.service.attention()

@@ -35,6 +35,7 @@ from .apply import (
 from .checkpoint import StateCheckpoint
 from .ledger import StateLedger
 from .models import SyncReport
+from .paths import normalize_path
 from .nextcloud_http import NextcloudConnectionError, NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
 from .settings import DEFAULTS, SettingsStore
@@ -441,7 +442,31 @@ class AppService:
         issue = self.state.library_issue(issue_id)
         if issue is None:
             raise ValueError("That library issue is no longer open.")
+        # A library issue is found in digiKam alone, so unlike a conflict it
+        # carries no Nextcloud file id. Formats a browser cannot draw are
+        # shown through Nextcloud's preview, which needs one, so it is looked
+        # up here rather than stored against every issue in the library.
+        if Path(str(issue.get("path", ""))).suffix.lower() not in BROWSER_IMAGE_EXTENSIONS:
+            issue = {**issue, "nc_file_id": self._nextcloud_file_id(str(issue["path"]))}
         return self._review_photo(issue, "library issue")
+
+    def _nextcloud_file_id(self, relative: str) -> int | None:
+        settings = self.settings.load()
+        photos = normalize_path(str(settings.get("nc_photos_path") or "")).strip("/")
+        wanted = normalize_path(str(relative)).strip("/")
+        backend = self._short_backend()
+        if backend is None:
+            return None
+        try:
+            nc_file, _ = backend.resolve_file_with_faces(
+                normalize_path(f"{photos}/{wanted}") if photos else wanted
+            )
+        except Exception as error:
+            LOG.debug("Could not find %s in Nextcloud: %s", relative, error)
+            return None
+        finally:
+            backend.close()
+        return None if nc_file is None else int(nc_file.file_id)
 
     def notifications_delivered(self, payload: dict[str, Any]) -> dict[str, Any]:
         raw = payload.get("ids")

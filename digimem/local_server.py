@@ -88,9 +88,15 @@ class DigiMemHandler(BaseHTTPRequestHandler):
         elif path == "/api/library/issues":
             self._json(HTTPStatus.OK, self.server.app.library_issues())
         elif path.startswith("/api/library/issues/") and path.endswith("/photo"):
-            issue_id = int(path.strip("/").split("/")[3])
-            body, content_type = self.server.app.library_issue_photo(issue_id)
-            self._bytes(HTTPStatus.OK, body, content_type)
+            # Anything raised here has to come back as a reply. Letting it out
+            # closes the connection instead, which the page can only report as
+            # a network error, with nothing to say what went wrong.
+            try:
+                issue_id = int(path.strip("/").split("/")[3])
+                body, content_type = self.server.app.library_issue_photo(issue_id)
+                self._bytes(HTTPStatus.OK, body, content_type)
+            except ValueError as error:
+                self._json(HTTPStatus.NOT_FOUND, {"error": str(error)})
         elif path == "/api/runs":
             query = parse_qs(urlparse(self.path).query)
             try:
