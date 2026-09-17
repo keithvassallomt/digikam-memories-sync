@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import relaunch
+
 LOG = logging.getLogger(__name__)
 
 SERVICE_NAME = "digimem"
@@ -23,10 +25,7 @@ WINDOWS_VALUE = "DigiMem"
 
 
 def _command(config_dir: str | Path | None = None) -> list[str]:
-    command = [sys.executable, "-m", "digimem", "service"]
-    if config_dir:
-        command += ["--config-dir", str(config_dir)]
-    return command
+    return relaunch.command("service", config_dir)
 
 
 def _quote(value: str) -> str:
@@ -225,14 +224,8 @@ def _open_run_key(write: bool):  # type: ignore[no-untyped-def]
 
 
 def _windows_command(config_dir: str | Path | None) -> str:
-    executable = sys.executable
-    # pythonw runs without a console window, which is what a login item wants.
-    windowless = Path(executable).with_name("pythonw.exe")
-    if windowless.is_file():
-        executable = str(windowless)
-    parts = [executable, "-m", "digimem", "service"]
-    if config_dir:
-        parts += ["--config-dir", str(config_dir)]
+    # A login item wants the form that opens no console window.
+    parts = relaunch.command("service", config_dir, windowless=True)
     return " ".join(_quote(part) for part in parts)
 
 

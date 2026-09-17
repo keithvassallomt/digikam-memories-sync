@@ -12,6 +12,7 @@ import time
 import webbrowser
 from pathlib import Path
 
+from . import relaunch
 from .service import (
     read_service_info,
     run_service,
@@ -27,10 +28,7 @@ POLL_INTERVAL = 0.25
 
 def service_command(config_dir: str | Path | None = None) -> list[str]:
     """The command that starts a service using this same installation."""
-    command = [sys.executable, "-m", "digimem", "service"]
-    if config_dir:
-        command += ["--config-dir", str(config_dir)]
-    return command
+    return relaunch.command("service", config_dir)
 
 
 def start_service_detached(config_dir: str | Path | None = None) -> subprocess.Popen[bytes]:

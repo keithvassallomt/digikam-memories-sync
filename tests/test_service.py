@@ -336,9 +336,9 @@ class ShortcutTest(unittest.TestCase):
     def test_a_properly_installed_package_needs_no_working_directory(self) -> None:
         root = str(Path(shortcuts.__file__).resolve().parent.parent)
         with patch(
-            "digimem.shortcuts.sysconfig.get_paths",
+            "digimem.relaunch.sysconfig.get_paths",
             return_value={"purelib": root, "platlib": root},
-        ):
+        ), patch("digimem.relaunch.console_script", return_value=None):
             self.assertIsNone(shortcuts.working_directory())
 
     def test_the_macos_runner_moves_before_it_runs(self) -> None:

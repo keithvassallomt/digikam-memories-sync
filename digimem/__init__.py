@@ -4,4 +4,4 @@ from .sync import sync
 from .models import SyncReport
 
 __all__ = ["sync", "SyncReport"]
-__version__ = "0.2.0"
+__version__ = "0.1.0"

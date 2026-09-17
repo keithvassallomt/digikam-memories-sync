@@ -10,10 +10,11 @@ import os
 import shutil
 import stat
 import subprocess
-import sysconfig
 import sys
 from pathlib import Path
 from typing import Any
+
+from . import relaunch
 
 LOG = logging.getLogger(__name__)
 
@@ -27,11 +28,6 @@ def icon_path(suffix: str) -> Path:
     return ICONS / f"{FILE_STEM}{suffix}"
 
 
-def _package_root() -> Path:
-    """The directory that has to be on the path for ``-m digimem`` to work."""
-    return Path(__file__).resolve().parent.parent
-
-
 def working_directory() -> Path | None:
     """Where the shortcut must run, or None if it can run anywhere.
 
@@ -41,19 +37,11 @@ def working_directory() -> Path | None:
     front of the path. Without that the entry launches, fails to import, and
     exits without a window, which looks exactly like clicking it did nothing.
     """
-    root = _package_root()
-    installed = {
-        Path(sysconfig.get_paths()[name]).resolve()
-        for name in ("purelib", "platlib")
-    }
-    return None if root in installed else root
+    return relaunch.working_directory()
 
 
 def _command(config_dir: str | Path | None = None) -> list[str]:
-    command = [sys.executable, "-m", "digimem", "ui"]
-    if config_dir:
-        command += ["--config-dir", str(config_dir)]
-    return command
+    return relaunch.command("ui", config_dir, windowless=True)
 
 
 def _quote(value: str) -> str:
@@ -154,17 +142,14 @@ def _install_macos(config_dir: str | Path | None, bundle: Path) -> None:
     )
 
 
-def _windows_executable() -> str:
-    """Prefer the interpreter that opens no console window."""
-    windowless = Path(sys.executable).with_name("pythonw.exe")
-    return str(windowless) if windowless.is_file() else sys.executable
+def _windows_target(config_dir: str | Path | None) -> tuple[str, str]:
+    """What a Start Menu entry points at, and what it passes.
 
-
-def _windows_arguments(config_dir: str | Path | None) -> str:
-    parts = ["-m", "digimem", "ui"]
-    if config_dir:
-        parts += ["--config-dir", str(config_dir)]
-    return " ".join(_quote(part) for part in parts)
+    A .lnk keeps the two apart, so the command is split here rather than
+    quoted into one string.
+    """
+    executable, *arguments = _command(config_dir)
+    return executable, " ".join(_quote(part) for part in arguments)
 
 
 def _ps_quote(value: str) -> str:
@@ -182,8 +167,8 @@ def shortcut_script(target: Path, config_dir: str | Path | None) -> str:
     return "; ".join([
         "$s = (New-Object -ComObject WScript.Shell)"
         f".CreateShortcut({_ps_quote(target)})",
-        f"$s.TargetPath = {_ps_quote(_windows_executable())}",
-        f"$s.Arguments = {_ps_quote(_windows_arguments(config_dir))}",
+        f"$s.TargetPath = {_ps_quote(_windows_target(config_dir)[0])}",
+        f"$s.Arguments = {_ps_quote(_windows_target(config_dir)[1])}",
         *([f"$s.WorkingDirectory = {_ps_quote(working_directory())}"]
           if working_directory() else []),
         f"$s.IconLocation = {_ps_quote(icon_path('.ico'))}",
@@ -214,9 +199,8 @@ def _install_windows(config_dir: str | Path | None, path: Path) -> Path:
         )
 
     fallback = path.with_suffix(".cmd")
-    command = " ".join(
-        [_quote(_windows_executable()), _windows_arguments(config_dir)]
-    )
+    executable, arguments = _windows_target(config_dir)
+    command = " ".join([_quote(executable), arguments])
     root = working_directory()
     move = f'cd /d "{root}"\r\n' if root else ""
     fallback.write_text(

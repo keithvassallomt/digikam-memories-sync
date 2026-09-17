@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "digimem"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Two-way face synchronization between digiKam and Nextcloud Memories"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,6 +25,12 @@ desktop = [
 
 [project.scripts]
 digimem = "digimem.entrypoint:main"
+
+[project.gui-scripts]
+digimemw = "digimem.entrypoint:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "digimem.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["digimem*"]
