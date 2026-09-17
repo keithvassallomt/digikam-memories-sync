@@ -9,11 +9,12 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-from contextlib import closing
+import sys
+from contextlib import closing, contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from digimem import autostart, shortcuts
+from digimem import autostart, relaunch, shortcuts
 from digimem.log_store import SQLiteLogHandler, run_context
 from digimem.service import (
     EXIT_ALREADY_RUNNING,
@@ -32,6 +33,23 @@ def make_digikam_database(path: Path) -> None:
         for table in ("Images", "Tags", "TagProperties", "ImageTagProperties"):
             connection.execute(f"CREATE TABLE {table} (id INTEGER)")
         connection.commit()
+
+
+
+@contextmanager
+def source_checkout():
+    """Pin the installation shape these tests are about.
+
+    What a shortcut or login item has to say depends on how DigiMem was
+    installed, and a test environment may or may not have a console script on
+    the path — `pip install -e .` puts one there, a bare checkout does not.
+    Left to chance, these tests assert whatever the machine running them
+    happens to be, which is how they passed locally and failed in CI.
+    """
+    with patch("digimem.relaunch.frozen", return_value=False), patch(
+        "digimem.relaunch.console_script", return_value=None
+    ):
+        yield
 
 
 class ServiceLockTest(unittest.TestCase):
@@ -318,6 +336,7 @@ class ShortcutTest(unittest.TestCase):
             shortcuts.remove()
             self.assertFalse(shortcuts.status()["installed"])
 
+    @source_checkout()
     def test_the_entry_says_where_to_run_from_a_checkout(self) -> None:
         """Recording the interpreter is half the story. Run from a source
         checkout the package is not installed for it, and is found through the
@@ -341,6 +360,7 @@ class ShortcutTest(unittest.TestCase):
         ), patch("digimem.relaunch.console_script", return_value=None):
             self.assertIsNone(shortcuts.working_directory())
 
+    @source_checkout()
     def test_the_macos_runner_moves_before_it_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             bundle = Path(tmp) / "DigiMem.app"
@@ -350,6 +370,7 @@ class ShortcutTest(unittest.TestCase):
         self.assertLess(
             runner.index("cd "), runner.index("exec "), "moving after is too late")
 
+    @source_checkout()
     def test_the_windows_shortcut_records_where_to_run(self) -> None:
         script = shortcuts.shortcut_script(Path("C:/DigiMem.lnk"), None)
         self.assertIn("$s.WorkingDirectory = '", script)
@@ -382,6 +403,7 @@ class ShortcutTest(unittest.TestCase):
                 (bundle / "Contents" / "Resources" / "digimem.icns").is_file(),
                 "the plist names an icon, so the icon has to be in there")
 
+    @source_checkout()
     def test_the_windows_shortcut_is_a_lnk_that_carries_an_icon(self) -> None:
         """A .cmd cannot have an icon. A .lnk can, and PowerShell makes one
         without adding a dependency, since Windows already needs it."""
@@ -397,6 +419,7 @@ class ShortcutTest(unittest.TestCase):
         script = shortcuts.shortcut_script(Path("C:/it's here/DigiMem.lnk"), None)
         self.assertIn("'C:/it''s here/DigiMem.lnk'", script)
 
+    @source_checkout()
     def test_windows_falls_back_to_a_cmd_with_no_powershell(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch(
             "digimem.shortcuts.shutil.which", return_value=None
@@ -425,3 +448,48 @@ class ShortcutTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelaunchTest(unittest.TestCase):
+    """How DigiMem starts another copy of itself, in each shape it ships in.
+
+    Getting this wrong does not raise anything: the entry launches, fails to
+    import itself, and exits without a window, which looks exactly like
+    clicking it did nothing.
+    """
+
+    def test_a_checkout_runs_the_interpreter_with_dash_m(self) -> None:
+        with source_checkout():
+            command = relaunch.command("service")
+            self.assertEqual(command[1:], ["-m", "digimem", "service"])
+            self.assertEqual(
+                relaunch.working_directory(), relaunch.package_root(),
+                "a checkout is only importable from its own directory")
+
+    def test_an_installed_copy_names_its_script(self) -> None:
+        """A distribution package finds itself through a wrapper that sets
+        PYTHONPATH, and the wrapper is not what runs at login. Naming the
+        script rather than the interpreter is what survives that."""
+        script = Path("/usr/bin/digimem")
+        with patch("digimem.relaunch.frozen", return_value=False), patch(
+            "digimem.relaunch.console_script", return_value=script
+        ):
+            self.assertEqual(
+                relaunch.command("service"), ["/usr/bin/digimem", "service"])
+            self.assertIsNone(
+                relaunch.working_directory(),
+                "an installed package is found by import, not by directory")
+
+    def test_a_frozen_bundle_is_its_own_executable(self) -> None:
+        """A bundle has no interpreter to hand "-m digimem" to."""
+        bundle = "/Applications/DigiMem.app/Contents/MacOS/digimem"
+        with patch("digimem.relaunch.frozen", return_value=True), patch.object(
+            sys, "executable", bundle
+        ):
+            self.assertEqual(relaunch.command("service"), [bundle, "service"])
+            self.assertIsNone(relaunch.working_directory())
+
+    def test_the_configuration_directory_is_carried_through(self) -> None:
+        with source_checkout():
+            command = relaunch.command("service", "/tmp/somewhere")
+        self.assertEqual(command[-2:], ["--config-dir", "/tmp/somewhere"])
