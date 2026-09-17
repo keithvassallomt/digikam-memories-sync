@@ -43,6 +43,13 @@ person starts a run scoped to them.
 Reading the per-person hashes is free: it is the same scan that produced the
 whole-library value. About 20 ms over 13,756 face regions and 133 people.
 
+Measured end to end on 17 September 2026: two faces tagged as one person,
+noticed, waited out the quiet period, and synced themselves in 49 seconds
+against the 2m45s a full run takes here. Nothing followed it. The saving scales
+with how many photos that person appears in — 2,927 of 8,404 for this one — not
+with the size of the library, so a rarely photographed person is much cheaper
+again and a very common one saves little.
+
 Two things must stay conservative, and do. A change no one can be blamed for
 looks at everyone: an older companion app, a digiKam face on a tag that is not
 a person, a rename, which reads as two people rather than one. And the daily
