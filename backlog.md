@@ -89,6 +89,37 @@ What this gives up: a change made during a run, to a person that same run wrote
 to, is folded into what the run claims to have synced. The window is one run
 long and one person wide, and the daily sweep catches it.
 
+## Adjusting a box corrects the library it came from — done
+
+Reviewing a rejected face and moving its rectangle used to change only what was
+sent to the other library. The box it came from was left where it was, and that
+made a loop nothing could end.
+
+Traced on one real face, Eli Vassallo in `2026/03/26-03-03 12-35-32 182.jpg`:
+
+1. digiKam had an Eli box at `(0.1037, 0.3241, 0.3904, 0.3064)`, drawn over
+   Gail's face.
+2. Run 14 proposed it, the review moved it down onto Eli, and *that* rectangle
+   went into Memories as detection 36144. digiKam's box never moved.
+3. Run 15's reverse pass then saw a Memories face with no digiKam counterpart
+   and created a second digiKam box for it. Now there were two.
+4. The original still matched nothing: IoU 0.296 against Eli's detection, below
+   the 0.40 threshold. It overlapped Gail's detection by 0.588, but digiKam's
+   own Gail box matched that at ~1.0 and took it first.
+5. So every run proposed it, and every apply refused it, because a different
+   person's face was already there. Adjusting again each time landed on the
+   detection that already existed and returned "changed: false", leaving
+   digiKam exactly as it was.
+
+The rectangle is now written back to digiKam, behind the same rules as any
+other local write: digiKam has to be closed, and the database is backed up
+first. Moving it where it already is writes nothing, and a face somebody has
+since moved or deleted themselves is left alone.
+
+Only the digiKam direction can be corrected. The box came from there, and
+Recognize has no endpoint for moving a detection it already holds, so a
+`create_digikam` face adjusted in review still only changes what is written.
+
 ## Cross-platform process detection — done
 
 macOS and Windows can now tell whether digiKam is open, through `psutil` in the

@@ -382,6 +382,57 @@ class DigikamWriter:
             self.conn.rollback()
             raise
 
+    def move_face(
+        self, path: str, person: str, was: tuple[float, float, float, float],
+        now: tuple[float, float, float, float], *, image_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Redraw one face where a person said it belongs.
+
+        Correcting a rectangle in review says the box is wrong, not that a
+        different box should be sent onward this once. Leaving the original
+        behind is what makes the same face come back every run: it still has
+        no counterpart, so it is proposed again, and refused again.
+        """
+        try:
+            self.conn.execute("BEGIN IMMEDIATE")
+            image = self._image(path, image_id)
+            before, after = Rect(*map(float, was)).clamp(), Rect(*map(float, now)).clamp()
+            candidates = [
+                face for face in self._face_rows(image)
+                if person_names_match(str(face["row"]["person"] or ""), person)
+            ]
+            best = max(
+                candidates, key=lambda face: face["rect"].iou(before), default=None
+            )
+            if best is None or best["rect"].iou(before) < 0.4:
+                # Already moved, or removed, by whoever was here first.
+                self.conn.commit()
+                return {"changed": False, "digikam_image_id": int(image["image_id"])}
+            if best["rect"].iou(after) >= 0.99:
+                self.conn.commit()
+                return {
+                    "changed": False,
+                    "digikam_image_id": int(image["image_id"]),
+                    "digikam_tag_id": int(best["row"]["tagid"]),
+                }
+            value = self._pixel_region(after, image)
+            self.conn.execute(
+                """UPDATE ImageTagProperties SET value = ?
+                   WHERE imageid = ? AND tagid = ? AND property IN
+                         ('tagRegion', 'faceToTrain') AND value = ?""",
+                (value, int(image["image_id"]), int(best["row"]["tagid"]),
+                 str(best["row"]["value"])),
+            )
+            self.conn.commit()
+            return {
+                "changed": True,
+                "digikam_image_id": int(image["image_id"]),
+                "digikam_tag_id": int(best["row"]["tagid"]),
+            }
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def reassign_face(
         self, path: str, old_person: str, new_person: str,
         rect: tuple[float, float, float, float], *,

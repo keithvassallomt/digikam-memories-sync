@@ -1230,6 +1230,26 @@ class StateStore:
             self.conn.commit()
         return removed
 
+    def action(self, action_id: int) -> dict[str, Any] | None:
+        """One journalled change, with its action decoded."""
+        with self.lock:
+            row = self.conn.execute(
+                """SELECT id, run_id, target, operation, status, review, action_json
+                   FROM run_actions WHERE id = ?""",
+                (action_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row["id"]),
+            "run_id": int(row["run_id"]),
+            "target": str(row["target"]),
+            "operation": str(row["operation"]),
+            "status": str(row["status"]),
+            "review": row["review"],
+            "action": json.loads(row["action_json"]),
+        }
+
     def supersede_pending_actions(self, run_id: int, person: str = "") -> int:
         """Retire work left pending on the runs this one has just redone.
 

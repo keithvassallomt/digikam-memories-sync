@@ -502,6 +502,62 @@ class FakePsutil:
         return Handle()
 
 
+class MoveFaceTests(unittest.TestCase):
+    """Correcting a box in review has to correct the library it came from."""
+
+    # The fixture photo already carries Angie Galea here.
+    ANGIE = (0.1, 0.1, 0.2, 0.2)
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.database = Path(self.temp.name) / "digikam4.db"
+        make_writable_digikam(self.database)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def faces(self):
+        with DigikamWriter(self.database) as writer:
+            image = writer._image("2026/photo.jpg")
+            return [
+                (str(f["row"]["person"]), f["rect"].as_tuple())
+                for f in writer._face_rows(image)
+            ]
+
+    def test_the_box_moves_where_the_review_put_it(self):
+        with DigikamWriter(self.database) as writer:
+            outcome = writer.move_face(
+                "2026/photo.jpg", "Angie Galea", self.ANGIE, (0.5, 0.5, 0.2, 0.2))
+        self.assertTrue(outcome["changed"])
+        moved = [rect for person, rect in self.faces() if person == "Angie Galea"]
+        self.assertEqual(len(moved), 1, "moving is not copying")
+        self.assertAlmostEqual(moved[0][0], 0.5, places=2)
+        self.assertAlmostEqual(moved[0][1], 0.5, places=2)
+
+    def test_moving_it_where_it_already_is_changes_nothing(self):
+        with DigikamWriter(self.database) as writer:
+            outcome = writer.move_face(
+                "2026/photo.jpg", "Angie Galea", self.ANGIE, self.ANGIE)
+        self.assertFalse(outcome["changed"])
+
+    def test_a_face_that_is_no_longer_there_is_left_alone(self):
+        """Somebody moved or deleted it in digiKam first. Their change wins."""
+        with DigikamWriter(self.database) as writer:
+            outcome = writer.move_face(
+                "2026/photo.jpg", "Angie Galea", (0.7, 0.7, 0.2, 0.2), (0.5, 0.5, 0.2, 0.2))
+        self.assertFalse(outcome["changed"])
+        self.assertAlmostEqual(self.faces()[0][1][0], 0.1, places=2)
+
+    def test_it_never_touches_somebody_else(self):
+        with DigikamWriter(self.database) as writer:
+            writer.create_face("2026/photo.jpg", "Gail Vassallo", (0.6, 0.1, 0.2, 0.2))
+            writer.move_face(
+                "2026/photo.jpg", "Angie Galea", self.ANGIE, (0.3, 0.6, 0.2, 0.2))
+        gail = [rect for person, rect in self.faces() if person == "Gail Vassallo"]
+        self.assertAlmostEqual(gail[0][0], 0.6, places=2)
+        self.assertAlmostEqual(gail[0][1], 0.1, places=2)
+
+
 class ConfirmedByDefaultTests(unittest.TestCase):
     """Every box digiKam drew is offered to Recognize as the detection."""
 

@@ -11,6 +11,7 @@ from digimem import status as status_module
 from digimem.app_service import AppService
 from digimem.apply import build_apply_plan
 from digimem.settings import SettingsStore
+from tests.test_apply import make_writable_digikam
 from digimem.state_store import StateStore
 
 REJECTED = "Recognize face-import failed (HTTP 422): No face found inside the supplied rectangle"
@@ -221,6 +222,78 @@ class ReviewMarkerTest(unittest.TestCase):
         finally:
             reopened.close()
             self.state = StateStore(self.path)
+
+
+class SourceCorrectionTest(unittest.TestCase):
+    """Adjusting a rectangle means the box is wrong, not send a different one."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.database = root / "digikam4.db"
+        make_writable_digikam(self.database)
+        self.settings = SettingsStore(root / "config", use_keyring=False)
+        self.settings.save({
+            "digikam_library": str(root), "digikam_db": str(self.database),
+            "nextcloud_url": "https://cloud.test", "nc_user": "keith",
+            "nc_photos_path": "Photos",
+        }, "secret")
+        self.state = StateStore(root / "state.sqlite3")
+        self.service = AppService(self.settings, self.state)
+        self.run_id = self.state.create_run("all")
+        self.state.finish_run(self.run_id, "previewed", {"inserted": 1})
+        self.state.initialize_apply(self.run_id, [{
+            "target": "memories", "operation": "insert_memories", "action": "insert",
+            "path": "2026/photo.jpg", "person": "Angie Galea",
+            "rect": [0.1, 0.1, 0.2, 0.2], "digikam_image_id": 3,
+        }])
+        self.action_id = self.state.pending_apply_actions(self.run_id)[0]["id"]
+        self.state.finish_apply_action(self.action_id, "failed", error=REJECTED)
+        self.state.finish_apply(self.run_id, "apply_failed")
+
+    def tearDown(self):
+        self.state.close()
+        self.tmp.cleanup()
+
+    def digikam_rect(self):
+        from digimem.digikam_writer import DigikamWriter
+        with DigikamWriter(self.database) as writer:
+            image = writer._image("2026/photo.jpg")
+            return writer._face_rows(image)[0]["rect"].as_tuple()
+
+    def resolve(self, **payload):
+        with patch("digimem.app_service.digikam_is_running", return_value=False):
+            return self.service.resolve_failure(self.run_id, self.action_id, payload)
+
+    def test_the_adjusted_box_is_written_back_to_digikam(self):
+        result = self.resolve(decision="retry", rect=[0.5, 0.5, 0.2, 0.2])
+        self.assertEqual(result["source_corrected"], 1)
+        moved = self.digikam_rect()
+        self.assertAlmostEqual(moved[0], 0.5, places=2)
+        self.assertAlmostEqual(moved[1], 0.5, places=2)
+
+    def test_leaving_the_box_alone_writes_nothing(self):
+        result = self.resolve(decision="retry", rect=[0.1, 0.1, 0.2, 0.2])
+        self.assertEqual(result["source_corrected"], 0)
+        self.assertAlmostEqual(self.digikam_rect()[0], 0.1, places=2)
+
+    def test_keeping_the_face_writes_nothing(self):
+        result = self.resolve(decision="keep_source")
+        self.assertEqual(result["source_corrected"], 0)
+        self.assertAlmostEqual(self.digikam_rect()[0], 0.1, places=2)
+
+    def test_an_open_digikam_refuses_rather_than_writing_underneath_it(self):
+        with patch("digimem.app_service.digikam_is_running", return_value=True):
+            with self.assertRaisesRegex(ValueError, "Close digiKam"):
+                self.service.resolve_failure(
+                    self.run_id, self.action_id,
+                    {"decision": "retry", "rect": [0.5, 0.5, 0.2, 0.2]})
+        self.assertAlmostEqual(self.digikam_rect()[0], 0.1, places=2)
+
+    def test_the_correction_is_backed_up_first(self):
+        self.resolve(decision="retry", rect=[0.5, 0.5, 0.2, 0.2])
+        backups = list((self.settings.root / "backups").glob("digikam4-review-*.db"))
+        self.assertEqual(len(backups), 1, "local writes are backed up, this one too")
 
 
 class SupersededWorkTest(unittest.TestCase):

@@ -1070,12 +1070,65 @@ class AppService:
             raise ValueError("This run has no failed changes to review.")
         return self.state.failure_review(run_id)
 
+    def _correct_source_box(
+        self, run_id: int, action_id: int, decision: str, rect: list[float] | None
+    ) -> int:
+        """Redraw the face in digiKam where the review says it belongs.
+
+        Moving the rectangle here means "this box is wrong", not "send a
+        different box this once". Correcting only what is sent leaves the
+        original where it was, with still nothing matching it, so the next run
+        proposes it again and the one after that too.
+
+        Only the digiKam direction can be corrected: the box came from there,
+        and Recognize has no way to move a detection it already holds.
+        """
+        if decision != "retry" or not rect:
+            return 0
+        action = self.state.action(action_id)
+        if action is None or action.get("run_id") != run_id:
+            return 0
+        body = action["action"]
+        if body.get("operation") != "insert_memories":
+            return 0
+        was = body.get("rect")
+        if not was or [round(v, 6) for v in was] == [round(v, 6) for v in rect]:
+            return 0
+
+        settings = self.settings.load()
+        database = settings.get("digikam_db")
+        if not database:
+            return 0
+        if digikam_is_running() or not digikam_database_is_free(database):
+            raise ValueError(
+                "Close digiKam before changing a face box, so it does not "
+                "overwrite the change when it next saves."
+            )
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        destination = self.settings.root / "backups" / f"digikam4-review-{timestamp}.db"
+        create_sqlite_backup(database, destination)
+        with DigikamWriter(database) as writer:
+            outcome = writer.move_face(
+                str(body.get("path") or ""),
+                str(body.get("person") or ""),
+                tuple(was),
+                tuple(rect),
+                image_id=body.get("digikam_image_id"),
+            )
+        if outcome.get("changed"):
+            LOG.info(
+                "Redrew the %s face in %s to match the review",
+                body.get("person"), body.get("path"),
+            )
+        return 1 if outcome.get("changed") else 0
+
     def resolve_failure(
         self, run_id: int, action_id: int, payload: dict[str, Any]
     ) -> dict[str, Any]:
         decision = str(payload.get("decision", ""))
         rect_value = payload.get("rect")
         rect = [float(value) for value in rect_value] if isinstance(rect_value, list) else None
+        corrected = self._correct_source_box(run_id, action_id, decision, rect)
         result = self.state.resolve_failed_action(
             run_id,
             action_id,
@@ -1083,6 +1136,7 @@ class AppService:
             rect=rect,
             apply_to_remaining=payload.get("apply_to_remaining") is True,
         )
+        result = {**result, "source_corrected": corrected}
         if result["remaining"] == 0 and result["pending"] == 0:
             final = self.state.finish_apply(run_id, "applied")
             self.state.update_progress(
