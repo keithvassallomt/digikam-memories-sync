@@ -34,7 +34,7 @@ jobs:
       version: ${{ steps.pick.outputs.version }}
       nextcloud: ${{ steps.pick.outputs.nextcloud }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: pick
         run: |
           set -euo pipefail
@@ -63,8 +63,8 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
       - run: python -m pip install -e '.[desktop,database]'
       - run: python -m unittest discover -s tests
@@ -74,7 +74,7 @@ jobs:
     needs: [version, tests]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No interpreter goes in these: they depend on the distribution's own,
       # which is what keeps one package working on every architecture.
@@ -89,7 +89,7 @@ jobs:
       - name: Install nfpm
         run: |
           set -euo pipefail
-          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.41.3/nfpm_2.41.3_amd64.deb -o /tmp/nfpm.deb
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_amd64.deb -o /tmp/nfpm.deb
           sudo dpkg -i /tmp/nfpm.deb
 
       - name: Build
@@ -112,7 +112,7 @@ jobs:
           digimem --help
           python3 -c "import sys; sys.path.insert(0, '/usr/lib/digimem'); import digimem; print('installed version', digimem.__version__)"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-packages
           path: dist/*
@@ -126,7 +126,7 @@ jobs:
     # on distributions newer than the runner.
     container: quay.io/pypa/manylinux_2_28_x86_64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build the frozen tree
         env:
@@ -162,7 +162,7 @@ jobs:
           ARCH=x86_64 /tmp/appimagetool AppDir "out/DigiMem-${VERSION}-x86_64.AppImage"
           ls -la out/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: appimage
           path: out/*.AppImage
@@ -172,8 +172,8 @@ jobs:
     needs: [version, tests]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
 
       - name: Build the frozen tree
@@ -193,7 +193,7 @@ jobs:
           choco install innosetup --no-progress -y
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VERSION packaging\windows\digimem.iss
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-installer
           path: dist/*Setup.exe
@@ -215,8 +215,8 @@ jobs:
       # here, where it can.
       HAS_SIGNING: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "${{ env.PYTHON_VERSION }}" }
 
       - name: Build the app bundle
@@ -265,7 +265,7 @@ jobs:
           mv "out/DigiMem-${VERSION}.dmg" "out/DigiMem-${VERSION}-${{ matrix.arch }}.dmg"
           ls -la out/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           path: out/*.dmg
@@ -275,9 +275,9 @@ jobs:
     needs: [version]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ./build-nextcloud-app.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nextcloud-app
           path: dist/digikam_face_sync-*.tar.gz
@@ -291,8 +291,8 @@ jobs:
     # without creating a release that has to be deleted afterwards.
     if: github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
