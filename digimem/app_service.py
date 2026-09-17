@@ -935,6 +935,19 @@ class AppService:
 
             final_status = "applied" if not counts["failed"] and not counts["pending"] else "apply_failed"
             final = self.state.finish_apply(run_id, final_status)
+            if final_status == "applied":
+                # This run has just redone the ground an earlier one covered,
+                # so whatever that one left waiting is settled or unwanted.
+                run = self.state.run(run_id) or {}
+                retired = self.state.supersede_pending_actions(
+                    run_id,
+                    str(run.get("person") or "") if run.get("mode") == "person" else "",
+                )
+                if retired:
+                    LOG.info(
+                        "Run %s superseded %s change(s) left waiting on earlier runs",
+                        run_id, retired,
+                    )
             self.state.update_progress(
                 run_id,
                 "completed" if final_status == "applied" else "apply_failed",

@@ -223,6 +223,59 @@ class ReviewMarkerTest(unittest.TestCase):
             self.state = StateStore(self.path)
 
 
+class SupersededWorkTest(unittest.TestCase):
+    """A change that failed once and succeeded later must stop being offered."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = StateStore(Path(self.tmp.name) / "state.sqlite3")
+
+    def tearDown(self):
+        self.state.close()
+        self.tmp.cleanup()
+
+    def run_with_pending(self, person="Eli", mode="all"):
+        run_id = self.state.create_run(mode, person=person if mode == "person" else "")
+        self.state.finish_run(run_id, "previewed", {"inserted": 1})
+        self.state.initialize_apply(run_id, [{
+            "target": "memories", "operation": "insert_memories", "action": "insert",
+            "path": "a.jpg", "person": person, "rect": [0.1, 0.1, 0.05, 0.08],
+        }])
+        return run_id
+
+    def test_a_later_full_run_retires_what_an_earlier_one_left_waiting(self):
+        stale = self.run_with_pending()
+        later = self.run_with_pending()
+        self.assertEqual(self.state.supersede_pending_actions(later), 1)
+        self.assertEqual(self.state.apply_counts(stale)["pending"], 0)
+        self.assertEqual(
+            self.state.apply_counts(later)["pending"], 1,
+            "a run never supersedes its own work")
+
+    def test_a_scoped_run_only_speaks_for_its_own_person(self):
+        eli = self.run_with_pending(person="Eli")
+        gail = self.run_with_pending(person="Gail")
+        later = self.run_with_pending(person="Gail", mode="person")
+        self.state.supersede_pending_actions(later, "Gail")
+        self.assertEqual(self.state.apply_counts(gail)["pending"], 0)
+        self.assertEqual(
+            self.state.apply_counts(eli)["pending"], 1,
+            "this run never looked at Eli, so it cannot answer for him")
+
+    def test_superseded_work_no_longer_makes_a_run_actionable(self):
+        """The symptom: Home offered the same change after every sync."""
+        stale = self.run_with_pending()
+        self.state.finish_apply(stale, "apply_failed")
+        self.assertEqual(self.state.latest_actionable_run()["id"], stale)
+
+        later = self.run_with_pending()
+        self.state.supersede_pending_actions(later)
+        self.state.finish_apply(later, "applied")
+        self.assertIsNone(
+            self.state.latest_actionable_run(),
+            "nothing is waiting once the newer run has covered the same ground")
+
+
 class PartlyAppliedHomeTest(unittest.TestCase):
     """A run holding reviewed faces must not vanish from the home screen."""
 

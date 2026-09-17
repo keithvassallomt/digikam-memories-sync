@@ -482,12 +482,22 @@ class StateStore:
             self.conn.commit()
 
     def latest_actionable_run(self) -> dict[str, Any] | None:
+        """The newest run with something a person can still do about it.
+
+        A run that failed part way is only actionable while it still holds work
+        to retry or review. Once that work is done or superseded it keeps its
+        status, because it did fail, but it stops being offered.
+        """
         with self.lock:
             row = self.conn.execute(
-                """SELECT id FROM runs
-                   WHERE status IN ('queued', 'waiting', 'previewing', 'previewed',
-                                    'applying', 'deferred', 'apply_failed')
-                   ORDER BY id DESC LIMIT 1"""
+                """SELECT r.id FROM runs r
+                   WHERE r.status IN ('queued', 'waiting', 'previewing',
+                                      'previewed', 'applying', 'deferred')
+                      OR (r.status = 'apply_failed' AND EXISTS (
+                            SELECT 1 FROM run_actions a
+                            WHERE a.run_id = r.id
+                              AND a.status IN ('pending', 'failed')))
+                   ORDER BY r.id DESC LIMIT 1"""
             ).fetchone()
         return self.run(int(row[0])) if row is not None else None
 
@@ -691,13 +701,15 @@ class StateStore:
             ).fetchall()
         counts = {
             "total": 0, "applied": 0, "failed": 0, "pending": 0, "ignored": 0,
-            "memories": 0, "digikam": 0,
+            "superseded": 0, "memories": 0, "digikam": 0,
         }
         for row in rows:
             amount = int(row["amount"])
             counts["total"] += amount
-            counts[str(row["status"])] += amount
-            counts[str(row["target"])] += amount
+            # A status this version does not know is still work that existed,
+            # so it counts towards the total and nothing else.
+            counts[str(row["status"])] = counts.get(str(row["status"]), 0) + amount
+            counts[str(row["target"])] = counts.get(str(row["target"]), 0) + amount
         return counts
 
     def remaining_apply_counts(self, run_id: int) -> dict[str, int]:
@@ -1217,6 +1229,30 @@ class StateStore:
             removed += cursor.rowcount or 0
             self.conn.commit()
         return removed
+
+    def supersede_pending_actions(self, run_id: int, person: str = "") -> int:
+        """Retire work left pending on the runs this one has just redone.
+
+        A run that reaches the end has looked at the library again and proposed
+        whatever was still needed, so anything an earlier run left waiting is
+        either done or no longer wanted. Without this, one change that failed
+        once and succeeded later stays on the older run for ever, and the home
+        screen offers it again after every sync.
+
+        A run scoped to one person only looked at that person, so it may only
+        speak for them.
+        """
+        with self.lock:
+            query = """UPDATE run_actions SET status = 'superseded'
+                       WHERE status = 'pending' AND run_id < ?"""
+            values: list[Any] = [run_id]
+            if person:
+                query += """ AND LOWER(TRIM(COALESCE(
+                                json_extract(action_json, '$.person'), ''))) = ?"""
+                values.append(person.strip().lower())
+            cursor = self.conn.execute(query, values)
+            self.conn.commit()
+        return int(cursor.rowcount or 0)
 
     def people_written_by(self, run_id: int) -> dict[str, set[str]]:
         """Which people this run changed, in which library.

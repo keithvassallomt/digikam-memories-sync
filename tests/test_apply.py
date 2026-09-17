@@ -387,7 +387,13 @@ class ApplyServiceTests(unittest.TestCase):
             try:
                 run_id = state.create_run("person")
                 state.save_result(run_id, {"run_id": run_id, "summary": {}, "actions": []})
-                state.initialize_apply(run_id, [])
+                # A real interrupted apply still holds the work it never got
+                # to. An empty plan is refused before an apply ever starts.
+                state.initialize_apply(run_id, [{
+                    "target": "memories", "operation": "insert_memories",
+                    "action": "insert", "path": "a.jpg", "person": "A",
+                    "rect": [0.1, 0.1, 0.05, 0.08],
+                }])
                 self.assertEqual(state.recover_interrupted_applies(), 1)
                 latest = state.latest_actionable_run()
                 self.assertEqual(latest["id"], run_id)
