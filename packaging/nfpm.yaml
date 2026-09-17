@@ -15,7 +15,7 @@ priority: optional
 maintainer: Keith Vassallo <keith@vassallo.cloud>
 vendor: Keith Vassallo
 homepage: https://github.com/keithvassallomt/digikam-memories-sync
-license: Beerware
+license: GPL-3.0-or-later
 description: |
   Two-way face synchronisation between digiKam and Nextcloud Memories.
   .

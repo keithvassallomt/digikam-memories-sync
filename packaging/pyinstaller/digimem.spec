@@ -92,6 +92,6 @@ if sys.platform == "darwin":
             "CFBundleVersion": os.environ.get("VERSION", "0.0.0"),
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "11.0",
-            "NSHumanReadableCopyright": "Beer-ware Licence (Revision 42)",
+            "NSHumanReadableCopyright": "Copyright © 2026 Keith Vassallo. Licensed under the GNU GPL v3 or later.",
         },
     )
