@@ -127,8 +127,7 @@ class LibraryIssueServiceTest(unittest.TestCase):
         self.service.check_library()
         issue = self.only_issue()
         target = issue["boxes"][1]
-        result = self.resolve(
-            issue["id"], decision="remove", person=target["person"], rect=target["rect"])
+        result = self.resolve(issue["id"], decision="remove", boxes=[target])
         self.assertTrue(result["removed"])
         self.assertEqual(result["issues"], [], "and the issue goes with it")
         with closing(sqlite3.connect(self.database)) as connection:
@@ -137,13 +136,47 @@ class LibraryIssueServiceTest(unittest.TestCase):
             ).fetchone()[0]
         self.assertEqual(left, 1, "the other box is untouched")
 
+    def test_removing_every_box_leaves_the_person_off_the_photo(self):
+        self.service.check_library()
+        issue = self.only_issue()
+        result = self.resolve(issue["id"], decision="remove", boxes=issue["boxes"])
+        self.assertEqual(result["removed"], 2)
+        with closing(sqlite3.connect(self.database)) as connection:
+            regions = connection.execute(
+                "SELECT COUNT(*) FROM ImageTagProperties WHERE property='tagRegion'"
+            ).fetchone()[0]
+            tagged = connection.execute(
+                "SELECT COUNT(*) FROM ImageTags WHERE imageid=3 AND tagid=44"
+            ).fetchone()[0]
+        self.assertEqual(regions, 0)
+        self.assertEqual(tagged, 0, "their last face here went, so the tag goes too")
+
+    def test_nothing_is_removed_when_one_of_the_boxes_is_not_offered(self):
+        """All or none, so a page that has fallen behind cannot half-finish."""
+        self.service.check_library()
+        issue = self.only_issue()
+        with self.assertRaisesRegex(ValueError, "not one of"):
+            self.resolve(issue["id"], decision="remove", boxes=[
+                issue["boxes"][0], {"person": "Angie Galea", "rect": [0.9, 0.9, 0.05, 0.05]},
+            ])
+        with closing(sqlite3.connect(self.database)) as connection:
+            regions = connection.execute(
+                "SELECT COUNT(*) FROM ImageTagProperties WHERE property='tagRegion'"
+            ).fetchone()[0]
+        self.assertEqual(regions, 2, "the good one was not taken either")
+
+    def test_an_empty_selection_is_refused(self):
+        self.service.check_library()
+        with self.assertRaisesRegex(ValueError, "which boxes"):
+            self.resolve(self.only_issue()["id"], decision="remove", boxes=[])
+
     def test_a_box_that_is_not_in_question_is_refused(self):
         """So a stale page cannot delete something nobody was shown."""
         self.service.check_library()
         with self.assertRaisesRegex(ValueError, "not one of"):
             self.resolve(
                 self.only_issue()["id"], decision="remove",
-                person="Angie Galea", rect=[0.9, 0.9, 0.05, 0.05])
+                boxes=[{"person": "Angie Galea", "rect": [0.9, 0.9, 0.05, 0.05]}])
 
     def test_an_open_digikam_refuses_rather_than_writing_underneath_it(self):
         self.service.check_library()
@@ -151,18 +184,58 @@ class LibraryIssueServiceTest(unittest.TestCase):
         target = issue["boxes"][1]
         with patch("digimem.app_service.digikam_is_running", return_value=True):
             with self.assertRaisesRegex(ValueError, "Close digiKam"):
-                self.service.resolve_library_issue(issue["id"], {
-                    "decision": "remove", "person": target["person"],
-                    "rect": target["rect"]})
+                self.service.resolve_library_issue(
+                    issue["id"], {"decision": "remove", "boxes": [target]})
 
     def test_removing_a_box_is_backed_up_first(self):
         self.service.check_library()
         issue = self.only_issue()
         target = issue["boxes"][1]
-        self.resolve(
-            issue["id"], decision="remove", person=target["person"], rect=target["rect"])
+        self.resolve(issue["id"], decision="remove", boxes=[target])
         backups = list((self.settings.root / "backups").glob("digikam4-library-*.db"))
         self.assertEqual(len(backups), 1)
+
+    def test_a_sitting_is_backed_up_once_rather_than_once_per_box(self):
+        """18 MB a click filled the folder in five minutes and pushed out the
+        backups taken before a sync wrote anything."""
+        with closing(sqlite3.connect(self.database)) as connection:
+            for x in (200, 400, 700):
+                connection.execute(
+                    "INSERT INTO ImageTagProperties VALUES (3, 34, 'tagRegion', ?)",
+                    (f'<rect x="{x}" y="500" width="120" height="100"/>',))
+            connection.commit()
+        self.service.check_library()
+        for _ in range(3):
+            issues = self.service.library_issues()["issues"]
+            if not issues:
+                break
+            self.resolve(issues[0]["id"], decision="remove", boxes=[issues[0]["boxes"][0]])
+        backups = list((self.settings.root / "backups").glob("digikam4-library-*.db"))
+        self.assertEqual(len(backups), 1, "one sitting, one backup")
+
+    def test_a_later_sitting_gets_its_own_backup(self):
+        """One backup covers a sitting, not the rest of time."""
+        from datetime import timedelta
+
+        self.service.check_library()
+        issue = self.only_issue()
+        self.resolve(issue["id"], decision="remove", boxes=[issue["boxes"][1]])
+        folder = self.settings.root / "backups"
+        first = next(folder.glob("digikam4-library-*.db"))
+
+        self.assertTrue(first.is_file())
+        with patch("digimem.app_service.LIBRARY_BACKUP_WINDOW", timedelta(0)), \
+                patch("digimem.app_service.create_sqlite_backup") as taken:
+            self.service._library_backup(str(self.database))
+        taken.assert_called_once()
+
+    def test_a_second_box_in_the_same_sitting_reuses_the_backup(self):
+        self.service.check_library()
+        issue = self.only_issue()
+        self.resolve(issue["id"], decision="remove", boxes=[issue["boxes"][1]])
+        with patch("digimem.app_service.create_sqlite_backup") as taken:
+            self.service._library_backup(str(self.database))
+        taken.assert_not_called()
 
     def test_issues_reach_the_attention_inbox(self):
         self.service.check_library()

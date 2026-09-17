@@ -74,17 +74,62 @@ export function create({ go, refresh }) {
     const frame = h('div', { class: 'photo-frame' }, loading, image, canvas, ...marks);
 
     const message = h('p', { class: 'message', role: 'status' });
-    const choices = issue.boxes.map((box, n) => h('button', {
-      type: 'button', class: 'name-choice',
-      onClick: () => resolve(issue, { decision: 'remove', person: box.person, rect: box.rect },
-        message, buttons),
-    }, h('span', { 'aria-hidden': 'true' }, String(n + 1)),
-       h('span', {}, h('strong', {}, `Remove box ${n + 1}`),
-         h('small', {}, `${box.person} · ${box.pixels.replace(/<\/?rect ?|\/>/g, '').trim()}`))));
-    const keep = button('Keep both, this is fine', {
-      onClick: () => resolve(issue, { decision: 'dismiss' }, message, buttons),
+    const many = issue.boxes.length > 2;
+    const ticks = [];
+
+    // Two boxes is a straight choice, so each one gets its own button. More
+    // than two has no single wrong one to point at, so they are ticked and the
+    // two buttons below decide what the ticks meant.
+    const rows = issue.boxes.map((box, n) => {
+      const label = h('small', {},
+        `${box.person} · ${box.pixels.replace(/<\/?rect ?|\/>/g, '').trim()}`);
+      if (!many) {
+        return h('button', {
+          type: 'button', class: 'name-choice',
+          onClick: () => resolve(issue, { decision: 'remove', boxes: [box] }, message, buttons),
+        }, h('span', { 'aria-hidden': 'true' }, String(n + 1)),
+           h('span', {}, h('strong', {}, `Remove box ${n + 1}`), label));
+      }
+      const tick = h('input', { type: 'checkbox', onChange: () => retitle() });
+      ticks.push(tick);
+      return h('label', { class: 'check' }, tick,
+        h('span', {}, h('strong', {}, `Box ${n + 1}`), label));
     });
-    const buttons = [...choices, keep];
+
+    const selected = () => issue.boxes.filter((_, n) => ticks[n]?.checked);
+    const keep = button('', {
+      onClick: () => {
+        const chosen = selected();
+        // Keeping a selection means the rest of them go.
+        const doomed = issue.boxes.filter((box) => !chosen.includes(box));
+        if (!chosen.length) return resolve(issue, { decision: 'dismiss' }, message, buttons);
+        return resolve(issue, { decision: 'remove', boxes: doomed }, message, buttons);
+      },
+    });
+    const removeAll = button('', {
+      class: 'button button-danger',
+      onClick: () => {
+        const chosen = selected();
+        return resolve(
+          issue,
+          { decision: 'remove', boxes: chosen.length ? chosen : issue.boxes },
+          message, buttons,
+        );
+      },
+    });
+
+    function retitle() {
+      const chosen = selected().length;
+      keep.textContent = chosen ? `Keep ${chosen} selected` : `Keep all ${issue.boxes.length}, this is fine`;
+      removeAll.textContent = chosen
+        ? `Remove ${chosen} selected`
+        : `Remove all ${issue.boxes.length}`;
+      removeAll.disabled = false;
+    }
+    retitle();
+    if (!many) keep.textContent = 'Keep both, this is fine';
+
+    const buttons = [...rows.filter((row) => row.tagName === 'BUTTON'), keep, removeAll];
 
     replace(body,
       h('div', { class: 'row' },
@@ -98,8 +143,8 @@ export function create({ go, refresh }) {
           h('p', { class: 'photo-caption' }, issue.path)),
         h('div', {},
           h('p', { class: 'muted' }, EXPLANATION[issue.kind] || ''),
-          ...choices,
-          h('div', { class: 'actions' }, keep))),
+          ...rows,
+          h('div', { class: 'actions' }, keep, removeAll))),
       message,
       h('p', { class: 'note' },
         'Removing a box changes digiKam, so it has to be closed. '

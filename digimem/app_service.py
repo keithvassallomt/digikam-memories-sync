@@ -45,6 +45,9 @@ REQUIRED_DIGIKAM_TABLES = {"Images", "Tags", "TagProperties", "ImageTagPropertie
 BROWSER_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif"}
 LOG = logging.getLogger(__name__)
 
+# How long one backup covers a sitting at the library screen.
+LIBRARY_BACKUP_WINDOW = timedelta(hours=1)
+
 
 class InvalidDigikamLibrary(ValueError):
     pass
@@ -357,19 +360,9 @@ class AppService:
             self.state.settle_library_issue(issue_id, "dismissed")
             return {"removed": False, **self.library_issues()}
         if decision != "remove":
-            raise ValueError("Choose whether to remove the box or keep it.")
+            raise ValueError("Choose whether to remove the boxes or keep them.")
 
-        rect = payload.get("rect")
-        person = str(payload.get("person") or "")
-        if not isinstance(rect, list) or len(rect) != 4 or not person:
-            raise ValueError("Say which box to remove.")
-        if not any(
-            str(box.get("person")) == person
-            and [round(v, 6) for v in box.get("rect", [])] == [round(float(v), 6) for v in rect]
-            for box in issue.get("boxes", [])
-        ):
-            raise ValueError("That box is not one of the ones in question.")
-
+        wanted = self._boxes_in_question(issue, payload)
         settings = self.settings.load()
         database = str(settings.get("digikam_db") or "")
         if not database:
@@ -379,21 +372,70 @@ class AppService:
                 "Close digiKam before removing a face box, so it does not "
                 "put it back when it next saves."
             )
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        create_sqlite_backup(
-            database, self.settings.root / "backups" / f"digikam4-library-{timestamp}.db"
-        )
+        self._library_backup(database)
+        removed = 0
         with DigikamWriter(database) as writer:
-            outcome = writer.remove_face(
-                str(issue["path"]), person, tuple(float(v) for v in rect),
-                image_id=issue.get("image_id"),
-            )
-        if outcome.get("changed"):
-            LOG.info("Removed a %s face box from %s", person, issue["path"])
+            for person, rect in wanted:
+                outcome = writer.remove_face(
+                    str(issue["path"]), person, rect, image_id=issue.get("image_id"),
+                )
+                removed += 1 if outcome.get("changed") else 0
+        if removed:
+            LOG.info("Removed %s face box(es) from %s", removed, issue["path"])
         # Re-check rather than assume: removing one box can settle a second
         # issue about the same photo, and can leave one that is still wrong.
         self.check_library()
-        return {"removed": bool(outcome.get("changed")), **self.library_issues()}
+        return {"removed": removed, **self.library_issues()}
+
+    def _library_backup(self, database: str) -> Path | None:
+        """One backup per sitting, rather than one per box.
+
+        A copy of this database is 18 MB. Taking one for every box removed
+        filled the folder with near-identical copies in five minutes, and
+        retention then evicted the backups taken before a sync wrote anything,
+        which are the ones worth keeping. A backup is here so you can get back
+        to before you started, so one covers the whole sitting.
+        """
+        folder = self.settings.root / "backups"
+        recent = [
+            path for path in folder.glob("digikam4-library-*.db")
+            if datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)
+            < LIBRARY_BACKUP_WINDOW
+        ]
+        if recent:
+            return max(recent, key=lambda path: path.stat().st_mtime)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return create_sqlite_backup(database, folder / f"digikam4-library-{timestamp}.db")
+
+    @staticmethod
+    def _boxes_in_question(
+        issue: dict[str, Any], payload: dict[str, Any]
+    ) -> list[tuple[str, tuple[float, ...]]]:
+        """The boxes to remove, checked against the ones actually offered.
+
+        Every one is matched before any is removed, so a page that has fallen
+        behind cannot take away a box nobody was shown, and cannot half-finish.
+        """
+        raw = payload.get("boxes")
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("Say which boxes to remove.")
+        offered = {
+            (str(box.get("person")), tuple(round(float(v), 6) for v in box.get("rect", [])))
+            for box in issue.get("boxes", [])
+        }
+        wanted: list[tuple[str, tuple[float, ...]]] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                raise ValueError("Say which boxes to remove.")
+            rect = entry.get("rect")
+            person = str(entry.get("person") or "")
+            if not isinstance(rect, list) or len(rect) != 4 or not person:
+                raise ValueError("Say which boxes to remove.")
+            key = (person, tuple(round(float(v), 6) for v in rect))
+            if key not in offered:
+                raise ValueError("That box is not one of the ones in question.")
+            wanted.append((person, tuple(float(v) for v in rect)))
+        return wanted
 
     def library_issue_photo(self, issue_id: int) -> tuple[bytes, str]:
         issue = self.state.library_issue(issue_id)

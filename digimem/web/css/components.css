@@ -39,6 +39,9 @@
 .button:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
 .button-primary { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
 .button-quiet { background: transparent; border-color: transparent; }
+/* Removing a face box is the one action here that takes something away. */
+.button-danger { border-color: var(--bad); color: var(--bad); }
+.button-danger:hover { background: color-mix(in srgb, var(--bad) 10%, var(--panel)); border-color: var(--bad); }
 .button-small { font-size: 13px; min-height: 34px; padding: 6px 11px; }
 .button:disabled { cursor: not-allowed; opacity: .5; }
 .button.back { margin-bottom: 10px; padding-left: 0; }

@@ -88,10 +88,14 @@ Two things are looked for. **A person tagged more than once in one photo**,
 because a person has one face in a photograph, so one of the boxes is usually a
 mistake. And **a box drawn inside another person's**, because faces do not nest.
 
-They arrive in Needs attention with the photo and both boxes drawn. You can
-remove the wrong one without leaving DigiMem, which needs digiKam closed and
-backs up `digikam4.db` first, or keep both, which is remembered and never asked
-again. An automatic sync that finds new ones says so once.
+They arrive in Needs attention with the photo and every box drawn on it. With
+two boxes each gets its own Remove button; with more, they are ticked and the
+two buttons below decide whether the ticks meant keep or remove. There is also
+Remove all, for a photo where the person is not there at all.
+
+Removing needs digiKam closed, and backs up `digikam4.db` once per sitting
+rather than once per box. Keeping them is remembered and never asked again. An
+automatic sync that finds new ones says so once.
 
 Left alone, a wrongly drawn box is proposed on every run and refused on every
 run, for ever, because the other library has a different person in that spot.
