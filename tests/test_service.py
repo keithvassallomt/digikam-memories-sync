@@ -493,3 +493,53 @@ class RelaunchTest(unittest.TestCase):
         with source_checkout():
             command = relaunch.command("service", "/tmp/somewhere")
         self.assertEqual(command[-2:], ["--config-dir", "/tmp/somewhere"])
+
+
+class AutostartDirectoryTest(unittest.TestCase):
+    """A login item has to say where to run, not just what to run.
+
+    Every mechanism here starts a service in the home directory, which is the
+    one place ``-m digimem`` cannot find a source checkout from. Getting this
+    wrong costs nothing at install time and fails on every login afterwards,
+    which with Restart=on-failure is a crash loop rather than a crash.
+    """
+
+    @source_checkout()
+    def test_the_systemd_unit_says_where_to_run(self) -> None:
+        unit = autostart._systemd_unit(None)
+        line = next(l for l in unit.splitlines() if l.startswith("WorkingDirectory="))
+        root = Path(line.removeprefix("WorkingDirectory="))
+        self.assertTrue((root / "digimem" / "__init__.py").is_file())
+        self.assertLess(
+            unit.index("[Service]"), unit.index("WorkingDirectory="),
+            "WorkingDirectory only means anything inside [Service]")
+
+    @source_checkout()
+    def test_the_xdg_entry_says_where_to_run(self) -> None:
+        entry = autostart._xdg_desktop(None)
+        line = next(l for l in entry.splitlines() if l.startswith("Path="))
+        self.assertTrue(
+            (Path(line.removeprefix("Path=")) / "digimem" / "__init__.py").is_file())
+
+    @source_checkout()
+    def test_the_launch_agent_says_where_to_run(self) -> None:
+        plist = autostart._launch_agent(None)
+        self.assertIn("<key>WorkingDirectory</key>", plist)
+
+    @source_checkout()
+    def test_the_windows_login_item_moves_before_it_runs(self) -> None:
+        command = autostart._windows_command(None)
+        self.assertLess(
+            command.index("cd /d"), command.index("digimem"),
+            "moving after the command has already started is too late")
+
+    def test_an_installed_copy_needs_no_directory(self) -> None:
+        """Only a checkout does. Naming one for an installed package would
+        pin the service to a directory that may not survive an upgrade."""
+        with patch("digimem.relaunch.frozen", return_value=False), patch(
+            "digimem.relaunch.console_script", return_value=Path("/usr/bin/digimem")
+        ):
+            self.assertNotIn("WorkingDirectory=", autostart._systemd_unit(None))
+            self.assertNotIn("Path=", autostart._xdg_desktop(None))
+            self.assertNotIn("WorkingDirectory", autostart._launch_agent(None))
+            self.assertNotIn("cd /d", autostart._windows_command(None))

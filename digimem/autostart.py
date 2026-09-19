@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from . import relaunch
+from .service import EXIT_ALREADY_RUNNING
 
 LOG = logging.getLogger(__name__)
 
@@ -80,13 +81,23 @@ def entry_path() -> Path | None:
 
 def _systemd_unit(config_dir: str | Path | None) -> str:
     executable = " ".join(_quote(part) for part in _command(config_dir))
+    # systemd starts a service in the home directory, which is the one place
+    # `-m digimem` cannot find a source checkout from. Without this the unit
+    # exits 1 on every start and Restart=on-failure turns that into a loop.
+    root = relaunch.working_directory()
+    directory = f"\nWorkingDirectory={root}" if root else ""
     return f"""[Unit]
 Description=DigiMem between digiKam and Nextcloud Memories
 After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart={executable}
+ExecStart={executable}{directory}
+# Exit 3 is "a service is already running", which is the normal outcome when
+# the interface was opened before the login item ran. It is a success as far as
+# a login item is concerned; without this, Restart=on-failure retries it every
+# ten seconds for the rest of the session.
+SuccessExitStatus={EXIT_ALREADY_RUNNING}
 Restart=on-failure
 RestartSec=10
 
@@ -97,11 +108,13 @@ WantedBy=default.target
 
 def _xdg_desktop(config_dir: str | Path | None) -> str:
     executable = " ".join(_quote(part) for part in _command(config_dir))
+    root = relaunch.working_directory()
+    directory = f"\nPath={root}" if root else ""
     return f"""[Desktop Entry]
 Type=Application
 Name=DigiMem
 Comment=Keep digiKam and Nextcloud Memories faces in sync
-Exec={executable}
+Exec={executable}{directory}
 Terminal=false
 X-GNOME-Autostart-enabled=true
 """
@@ -109,6 +122,10 @@ X-GNOME-Autostart-enabled=true
 
 def _launch_agent(config_dir: str | Path | None) -> str:
     arguments = "".join(f"\t\t<string>{part}</string>\n" for part in _command(config_dir))
+    root = relaunch.working_directory()
+    directory = (
+        f"\t<key>WorkingDirectory</key>\n\t<string>{root}</string>\n" if root else ""
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -118,7 +135,7 @@ def _launch_agent(config_dir: str | Path | None) -> str:
 \t<key>ProgramArguments</key>
 \t<array>
 {arguments}\t</array>
-\t<key>RunAtLoad</key>
+{directory}\t<key>RunAtLoad</key>
 \t<true/>
 \t<key>KeepAlive</key>
 \t<dict>
@@ -226,7 +243,14 @@ def _open_run_key(write: bool):  # type: ignore[no-untyped-def]
 def _windows_command(config_dir: str | Path | None) -> str:
     # A login item wants the form that opens no console window.
     parts = relaunch.command("service", config_dir, windowless=True)
-    return " ".join(_quote(part) for part in parts)
+    command = " ".join(_quote(part) for part in parts)
+    root = relaunch.working_directory()
+    if root is None:
+        return command
+    # A Run value is a command line with no working directory of its own, so a
+    # source checkout has to be moved into first. Only a checkout needs this;
+    # an installed or frozen DigiMem finds itself without help.
+    return f'cmd /c cd /d {_quote(str(root))} && {command}'
 
 
 def _enable_registry(config_dir: str | Path | None) -> dict[str, Any]:
