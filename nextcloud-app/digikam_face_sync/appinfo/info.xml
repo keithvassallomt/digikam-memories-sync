@@ -19,7 +19,7 @@ Recognize is busy so it can wait its turn.
 This app does nothing on its own. DigiMem itself is a desktop application for
 Linux, macOS and Windows, and is what talks to it.
 	]]></description>
-	<version>0.6.0</version>
+	<version>0.6.1</version>
 	<licence>agpl</licence>
 	<author mail="keith@vassallo.cloud">Keith Vassallo</author>
 	<namespace>DigikamFaceSync</namespace>

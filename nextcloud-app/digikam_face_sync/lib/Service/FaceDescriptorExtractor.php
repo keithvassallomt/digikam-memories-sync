@@ -38,11 +38,16 @@ final class FaceDescriptorExtractor {
 		} catch (\Throwable $e) {
 			return ['available' => false, 'recognizeVersion' => '', 'reason' => 'Recognize is not installed'];
 		}
-		if (version_compare($version, '12.0.0', '<') || version_compare($version, '13.0.0', '>=')) {
+		// Recognize 13 changed nothing this app depends on: the face tables are
+		// untouched between 12.0.2 and 13.1.0, face-api stays on 1.7.x so the
+		// model format and API are the same, and node_binary is still where it
+		// was. The upper bound stays, because an untested major is exactly what
+		// this guard is for.
+		if (version_compare($version, '12.0.0', '<') || version_compare($version, '14.0.0', '>=')) {
 			return [
 				'available' => false,
 				'recognizeVersion' => $version,
-				'reason' => 'This release supports Recognize 12.x',
+				'reason' => 'This release supports Recognize 12.x and 13.x',
 			];
 		}
 

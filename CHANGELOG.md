@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Nextcloud companion app (0.6.1) accepts Recognize 13 as well as 12.
+  Nothing it depends on moved between the two: the face tables are untouched,
+  face-api stays on 1.7.x so the model format and API are unchanged, and the
+  Node binary setting is where it was. An upper bound remains, because an
+  untested major is what the check is for.
+
 ### Fixed
+
+- When the companion app has turned a feature off, DigiMem says which one and
+  repeats the app's own reason, instead of reporting that the app needs
+  installing or updating. On a server running Recognize 13 that advice was
+  wrong in both halves: the app was current, and reinstalling it changed
+  nothing.
 
 - The Nextcloud companion app archive builds reproducibly: two clones of the
   same commit now produce the same bytes. Previously the file order came from

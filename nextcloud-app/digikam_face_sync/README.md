@@ -13,9 +13,9 @@ GET  /index.php/apps/digikam_face_sync/api/v1/people
 GET  /index.php/apps/digikam_face_sync/api/v1/faces
 ```
 
-It supports Nextcloud 33 to 35 and Recognize 12.x. The app talks to
+It supports Nextcloud 33 to 35 and Recognize 12.x and 13.x. The app talks to
 Recognize rather than to Nextcloud, and Recognize's tables have not moved
-across Nextcloud releases, which is what makes that range safe. A Recognize 12.x update
+across Nextcloud releases, which is what makes that range safe. A Recognize update
 needs no reinstall of this app. After a future Recognize major update, this app
 remains installed but pauses imports until its compatibility is checked and its
 version support is updated.
@@ -64,7 +64,7 @@ A healthy response contains `"createFaceDetection":true`.
 
 ## Update behaviour
 
-- Updating Recognize 12.x leaves this app and its settings in place.
+- Updating Recognize leaves this app and its settings in place.
 - Updating Nextcloud or Recognize beyond the versions listed above may disable
   imports, but does not remove the app or any existing face data.
 - Updating this app means replacing only the `digikam_face_sync` folder and
