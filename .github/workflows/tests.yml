@@ -1,0 +1,65 @@
+# The test suite, on every push and pull request.
+#
+# Deliberately separate from release.yml rather than another trigger on it: a
+# push must never be one misplaced condition away from building installers,
+# signing them with the Developer ID and publishing a release.
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push supersedes the run still going for the previous one.
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor stated in pyproject, and what the frozen builds use.
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e '.[desktop,database]'
+      - run: python -m unittest discover -s tests
+
+  manifest:
+    name: Nextcloud app manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The App Store validates this on upload and refuses the release if it
+      # fails, which is a slow and late way to find out.
+      - name: Validate info.xml against the App Store schema
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq libxml2-utils
+          curl -fsSL https://apps.nextcloud.com/schema/apps/info.xsd -o /tmp/info.xsd
+          xmllint --noout --schema /tmp/info.xsd \
+            nextcloud-app/digikam_face_sync/appinfo/info.xml
+
+      # Two clones of one commit must produce one archive, or nobody can check
+      # that a published release matches its source.
+      - name: The app archive builds reproducibly
+        run: |
+          set -euo pipefail
+          ./build-nextcloud-app.sh >/dev/null
+          first=$(sha256sum dist/digikam_face_sync-*.tar.gz | cut -d' ' -f1)
+          rm -f dist/digikam_face_sync-*.tar.gz
+          ./build-nextcloud-app.sh >/dev/null
+          second=$(sha256sum dist/digikam_face_sync-*.tar.gz | cut -d' ' -f1)
+          echo "first  $first"
+          echo "second $second"
+          [ "$first" = "$second" ] || { echo "the archive is not reproducible"; exit 1; }

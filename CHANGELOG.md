@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Nextcloud companion app archive builds reproducibly: two clones of the
+  same commit now produce the same bytes. Previously the file order came from
+  however the directory happened to be read and the timestamps from whenever
+  the files were checked out, so nobody could check that a published release
+  matched its source.
+
 ## [0.1.0] - 2026-09-19
 
 First release.
