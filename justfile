@@ -99,7 +99,14 @@ release:
 
     say "Committing and tagging"
     git add digimem/__init__.py nextcloud-app/digikam_face_sync/appinfo/info.xml
-    git commit -m "Release v$version"
+    # A first release, or a re-run after a failed one, changes no version files
+    # because they already say what is being released. There is nothing to
+    # commit then, and git treats that as an error. The tag is the point.
+    if git diff --cached --quiet; then
+        echo "  the version files already say $version, so there is nothing to commit"
+    else
+        git commit -m "Release v$version"
+    fi
     git tag -a "v$version" -m "DigiMem v$version"
     git push origin main "v$version"
 
