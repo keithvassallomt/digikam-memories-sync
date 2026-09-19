@@ -24,6 +24,54 @@ REPO = "keithvassallomt/digikam-memories-sync"
 #: A markdown link whose target is a path in this repository.
 RELATIVE_LINK = re.compile(r"\]\((?!https?://|#|mailto:)([^)]+)\)")
 
+#: A list item, ordered or not, at any indent.
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+\.)\s")
+
+
+def reflow(text: str) -> str:
+    """Join hard-wrapped lines back into one line per paragraph.
+
+    The files this is built from are wrapped at eighty columns, which is right
+    for reading them in an editor and for diffs that change one sentence. It is
+    wrong here: GitHub renders a release body with hard line breaks, so every
+    wrap becomes a visible break and the notes come out as a narrow ragged
+    column. Rendering is the only place that has to care.
+
+    Code fences and table rows are emitted untouched, because in both the line
+    breaks are the meaning.
+    """
+    out: list[str] = []
+    pending: list[str] = []
+    fenced = False
+
+    def flush() -> None:
+        if not pending:
+            return
+        first = pending[0]
+        indent = first[: len(first) - len(first.lstrip())]
+        out.append(indent + " ".join(line.strip() for line in pending))
+        pending.clear()
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            flush()
+            out.append(line)
+            fenced = not fenced
+        elif fenced or stripped.startswith("|"):
+            flush()
+            out.append(line)
+        elif not stripped or stripped.startswith("#"):
+            flush()
+            out.append(line)
+        elif LIST_ITEM.match(line):
+            flush()
+            pending.append(line)
+        else:
+            pending.append(line)
+    flush()
+    return "\n".join(out)
+
 
 def nextcloud_version() -> str:
     return ET.parse(INFO_XML).getroot().findtext("version") or "0.0.0"
@@ -43,7 +91,7 @@ def render(version: str) -> str:
     text = text.replace("{{CHANGELOG}}", body)
     text = text.replace("{{NEXTCLOUD_VERSION}}", nextcloud_version())
     text = text.replace("{{VERSION}}", version)
-    return absolute_links(text, f"v{version}")
+    return absolute_links(reflow(text), f"v{version}")
 
 
 def main(argv: list[str] | None = None) -> int:
