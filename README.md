@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="ClusterCut Logo" width="64" />
+  <img src="assets/logo.png" alt="ClusterCut Logo" width="128" />
 </p>
 
 # DigiMem
