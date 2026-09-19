@@ -26,17 +26,51 @@ photos, and it does not change anything for users who are not using DigiMem.
 
 ## What you need
 
-- Administrator access to the Nextcloud server, and a way to put files in its
-  apps directory.
+- Administrator access to the Nextcloud server. Installing from the App Store
+  needs nothing more than that; installing by hand also needs a way to put
+  files in the apps directory.
 - **Recognize** installed and enabled, and finished analysing the photo library.
   DigiMem cannot do anything useful until Recognize knows about the faces.
 - **Memories** installed, since that is the interface the faces are seen in.
 - PHP 8.2 or later.
 - A Nextcloud version this build of the app supports. Each release says which
-  versions it is for; Nextcloud refuses to enable an app outside that range and
-  says so plainly, which is the easy way to find out.
+  versions it is for. Nextcloud refuses to enable an app outside that range and
+  says so plainly, and the App Store simply does not offer it — either way you
+  find out before anything is installed.
 
-## 1. Get the app
+## Installing it
+
+There are two ways. The first is a few clicks and needs no shell access, so
+start there.
+
+### Option 1: from the Nextcloud App Store
+
+The app is published at
+[apps.nextcloud.com/apps/digikam_face_sync](https://apps.nextcloud.com/apps/digikam_face_sync).
+Nextcloud can fetch and enable it for you, which means no files to copy, no
+ownership to set, and updates offered to you the same way any other app's are.
+
+In the Nextcloud web interface, go to your profile picture → **Apps**, search
+for *digiKam Face Sync*, and press **Download and enable**.
+
+Or, from a terminal on the server:
+
+```bash
+sudo -u www-data php occ app:install digikam_face_sync
+```
+
+If searching turns up nothing, it is almost always that your Nextcloud version
+falls outside the range this release supports — the listing says which versions
+it is for. Nextcloud hides apps it cannot run rather than offering them and
+failing afterwards. Use option 2 if you need a version that is not offered, or
+wait for a release that covers yours.
+
+### Option 2: by hand
+
+Use this if the server has no access to the App Store, if you need a particular
+version, or if you would rather build it yourself.
+
+#### Get the archive
 
 Download `digikam_face_sync-<version>.tar.gz` from the
 [releases page](https://github.com/keithvassallomt/digikam-memories-sync/releases).
@@ -45,7 +79,7 @@ It is listed alongside the DigiMem downloads for the same release.
 If you would rather build it from source, run `./build-nextcloud-app.sh` in a
 clone of the repository. It writes the same archive into `dist/`.
 
-## 2. Put it on the server
+#### Put it on the server
 
 Nextcloud loads apps from an apps directory. Most installations have one or
 both of these:
@@ -82,7 +116,7 @@ the folder in with `docker cp` (or your platform's equivalent), then set the
 ownership with a command run inside the container. Everything below works the
 same way, with `occ` commands run inside the container.
 
-## 3. Turn it on
+#### Turn it on
 
 In the Nextcloud web interface, go to your profile picture → **Apps**, then
 **Disabled apps**. *digiKam Face Sync* will be listed there. Press **Enable**.
@@ -99,7 +133,7 @@ actually uses, and that the ownership is right.
 
 The app has no database tables of its own, so there is nothing else to run.
 
-## 4. Check it from DigiMem
+## Check it from DigiMem
 
 The honest test is the one that matters: open DigiMem on your computer, go to
 **Settings → Libraries → Nextcloud → Change** (or the setup screen, on a fresh
@@ -114,7 +148,15 @@ install) and press **Test connection**.
 
 ## Updating it
 
-Replace the folder with the new version and enable it again:
+**Installed from the App Store**, there is nothing special to do. Nextcloud
+offers the update under **Apps** like any other, or from a terminal:
+
+```bash
+sudo -u www-data php occ app:update digikam_face_sync
+```
+
+**Installed by hand**, replace the folder with the new version and enable it
+again:
 
 ```bash
 sudo rm -rf /var/www/html/custom_apps/digikam_face_sync
@@ -135,6 +177,14 @@ being told about them. Nothing breaks, and nothing is lost.
 
 ## Removing it
 
+**Installed from the App Store**, press **Remove** under **Apps**, or:
+
+```bash
+sudo -u www-data php occ app:remove digikam_face_sync
+```
+
+**Installed by hand**, disable it and delete the folder:
+
 ```bash
 sudo -u www-data php occ app:disable digikam_face_sync
 sudo rm -rf /var/www/html/custom_apps/digikam_face_sync
@@ -146,9 +196,12 @@ and will stop syncing until the app comes back.
 
 ## If something is not working
 
-**The app is not in the Apps list.** Nextcloud is not looking at the directory
-you put it in, or cannot read it. Check `config.php` for the app directories
-Nextcloud is configured with, and check ownership.
+**The app is not in the Apps list.** Searching the App Store and finding
+nothing usually means your Nextcloud version is outside the range this release
+supports; Nextcloud hides apps it cannot run. After a hand install it means
+Nextcloud is not looking at the directory you put it in, or cannot read it —
+check `config.php` for the app directories Nextcloud is configured with, and
+check ownership.
 
 **Nextcloud refuses to enable it**, mentioning versions. This build of the app
 does not support your Nextcloud version. Use the release that matches, or
