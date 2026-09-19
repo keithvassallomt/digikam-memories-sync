@@ -32,8 +32,18 @@ sudo apt install ./digimem_<version>_all.deb
 sudo dnf install ./digimem-<version>-1.noarch.rpm
 ```
 
-Both packages use the Python your distribution already has, so they are small
-and work on any architecture. They need Python 3.10 or later.
+### Arch Linux, Manjaro, EndeavourOS
+
+DigiMem is in the AUR as
+[`digimem-bin`](https://aur.archlinux.org/packages/digimem-bin), which
+repackages the same `.deb`, so there is nothing to download by hand:
+
+```bash
+yay -S digimem-bin
+```
+
+All three packages use the Python your distribution already has, so they are
+small and work on any architecture. They need Python 3.10 or later.
 
 ### Any distribution — AppImage
 
@@ -152,8 +162,9 @@ syncs and the remembered names are all kept, and settings files are quietly
 brought up to date the first time the new version starts.
 
 On Linux, install the new `.deb` or `.rpm` the same way you installed the first
-one, or replace the AppImage file. On macOS, drag the new app over the old one.
-On Windows, run the new installer.
+one, update `digimem-bin` through your AUR helper, or replace the AppImage
+file. On macOS, drag the new app over the old one. On Windows, run the new
+installer.
 
 If you use the Nextcloud companion app's newer features, update it too when its
 version changes. DigiMem tells you on the connection screen when the server

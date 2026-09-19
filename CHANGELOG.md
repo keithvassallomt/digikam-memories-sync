@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- DigiMem is on the AUR as `digimem-bin`, so Arch, Manjaro and EndeavourOS
+  install and update it the way they install everything else. It repackages
+  the published `.deb` rather than building from source, so the launcher, the
+  menu entry and the icon are the files every other Linux user gets.
+
 ## [0.2.0] - 2026-09-19
 
 ### Changed

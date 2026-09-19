@@ -79,6 +79,39 @@ or it will import into CI and fail at signing — then:
 base64 -w0 DeveloperID.p12 | gh secret set MACOS_CERTIFICATE_P12
 ```
 
+## Publishing to the AUR
+
+Arch is the one distribution that needs a step after the release, because the
+AUR holds a recipe rather than a file. The recipe, `digimem-bin`, repackages
+the published `.deb`: the launcher, the desktop entry and the icon are then the
+same files every other Linux user gets, and nothing about the Arch package has
+to be kept in step by hand. The `.deb` carries no interpreter and nothing
+compiled, so the result is architecture-independent too.
+
+Do it after the GitHub release exists, because the recipe carries the sha256 of
+the asset it points at, and the asset has to be published before it can be
+checksummed.
+
+```bash
+just aur           # build it and leave it somewhere to install, publishing nothing
+just aur-publish   # render, validate, and push to the AUR
+```
+
+Both need an Arch host with `base-devel`, and `gh` to find the release asset.
+Both build the package before publishing anything, because a broken PKGBUILD on
+the AUR is public. The build runs with `--nodeps` so that it does not depend on
+what is installed on the machine doing it; the dependency names are checked
+against the repositories separately, which is the part that actually matters.
+
+`just aur-publish` also needs an AUR account with your SSH key, and says what
+to set up if it cannot connect. It signs the AUR commit with the same key this
+project signs with, carried in from the project tree — a temporary checkout
+sees only global git config, where a `signingkey` that resolves only under an
+`includeIf` would abort the commit.
+
+Edit `packaging/aur/PKGBUILD.in`, never a generated `PKGBUILD`: the version and
+the checksum are filled in from the release each time.
+
 ## Publishing the companion app to the App Store
 
 The desktop release is independent of this. Do it after the GitHub release
