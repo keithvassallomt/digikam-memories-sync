@@ -94,6 +94,8 @@ python -m unittest discover -s tests
 
 [docs/architecture.md](docs/architecture.md) describes the parts, the
 repository layout and how a sync actually runs.
+[docs/releasing.md](docs/releasing.md) covers cutting a release and publishing
+the companion app to the Nextcloud App Store.
 
 ## Licence
 

@@ -79,4 +79,5 @@ Problems and suggestions go to
 ## For developers
 
 [architecture.md](architecture.md) describes what the parts are and how they
-fit together. It is not needed to use DigiMem.
+fit together, and [releasing.md](releasing.md) is for whoever cuts a release.
+Neither is needed to use DigiMem.
