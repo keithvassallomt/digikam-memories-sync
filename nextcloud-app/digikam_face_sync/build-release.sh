@@ -15,9 +15,15 @@ mkdir -p "$output_dir"
 # two clones of one commit produce two different archives and nobody can verify
 # that a published release matches its source.
 #
-# The timestamp is the last commit to touch the app, falling back to the epoch
-# outside a git checkout.
-epoch=$(git -C "$app_root" log -1 --format=%ct -- "$app_root" 2>/dev/null || true)
+# The timestamp is the commit being built, falling back to the epoch outside a
+# git checkout. Deliberately not "the last commit to touch the app": limiting
+# the log by path needs history to simplify against, and CI checks out a single
+# commit, so the same tag gave one timestamp on a full clone and another on a
+# shallow one. HEAD is the same in both.
+epoch=${SOURCE_DATE_EPOCH:-}
+if [ -z "$epoch" ]; then
+	epoch=$(git -C "$app_root" log -1 --format=%ct 2>/dev/null || true)
+fi
 epoch=${epoch:-0}
 
 tar --create --gzip --file "$archive" \

@@ -52,14 +52,24 @@ jobs:
 
       # Two clones of one commit must produce one archive, or nobody can check
       # that a published release matches its source.
-      - name: The app archive builds reproducibly
+      #
+      # Deepening between the two builds is the point rather than an accident:
+      # CI checks out a single commit, and a build that derives anything from
+      # git history behaves differently once the history is there. That is
+      # exactly how the first attempt at this passed here and still produced an
+      # archive nobody could reproduce from the tag.
+      - name: The app archive builds reproducibly, shallow or not
         run: |
           set -euo pipefail
           ./build-nextcloud-app.sh >/dev/null
-          first=$(sha256sum dist/digikam_face_sync-*.tar.gz | cut -d' ' -f1)
+          shallow=$(sha256sum dist/digikam_face_sync-*.tar.gz | cut -d' ' -f1)
           rm -f dist/digikam_face_sync-*.tar.gz
+
+          git fetch --unshallow --quiet 2>/dev/null || echo "already complete"
           ./build-nextcloud-app.sh >/dev/null
-          second=$(sha256sum dist/digikam_face_sync-*.tar.gz | cut -d' ' -f1)
-          echo "first  $first"
-          echo "second $second"
-          [ "$first" = "$second" ] || { echo "the archive is not reproducible"; exit 1; }
+          deep=$(sha256sum dist/digikam_face_sync-*.tar.gz | cut -d' ' -f1)
+
+          echo "shallow clone $shallow"
+          echo "full history  $deep"
+          [ "$shallow" = "$deep" ] || {
+            echo "the archive depends on how much history is checked out"; exit 1; }
