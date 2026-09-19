@@ -24,6 +24,6 @@ Recognize is busy so it can wait its turn.
 	<category>multimedia</category>
 	<dependencies>
 		<php min-version="8.2"/>
-		<nextcloud min-version="34" max-version="34"/>
+		<nextcloud min-version="33" max-version="35"/>
 	</dependencies>
 </info>

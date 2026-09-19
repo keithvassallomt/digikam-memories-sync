@@ -122,13 +122,13 @@ First release.
   named faces, and reports a change fingerprint and whether Recognize is busy.
 - Where the companion app is older than 0.5.0, change detection is left off and
   DigiMem falls back to its daily check.
-- Requires Nextcloud 34 and PHP 8.2 or later.
+- Requires Nextcloud 33 to 35 and PHP 8.2 or later.
 
 ### Requirements
 
 - Python 3.10 or later.
 - digiKam with an SQLite database.
-- Nextcloud 34 with Recognize installed and enabled, and the digiKam Face Sync
+- Nextcloud 33 to 35 with Recognize installed and enabled, and the digiKam Face
   companion app.
 
 [Unreleased]: https://github.com/keithvassallomt/digikam-memories-sync/compare/v0.1.0...HEAD

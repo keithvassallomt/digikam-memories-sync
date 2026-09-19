@@ -70,7 +70,7 @@ Recognize, so a Recognize update cannot overwrite it.
    sudo -u www-data php occ app:enable digikam_face_sync
    ```
 
-It needs Nextcloud 34 and PHP 8.2 or later, with Recognize installed and
+It needs Nextcloud 33 to 35 and PHP 8.2 or later, with Recognize installed and
 enabled. Full instructions, including permissions and troubleshooting, are in
 [docs/install-nextcloud-app.md](docs/install-nextcloud-app.md).
 
