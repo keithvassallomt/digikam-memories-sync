@@ -5,6 +5,9 @@
 	<name>digiKam Face Sync</name>
 	<summary>Connects digiKam face rectangles with Recognize</summary>
 	<description><![CDATA[
+The Nextcloud half of DigiMem, which keeps face names and rectangles in step
+between a local digiKam library and Nextcloud Memories, in both directions.
+
 Adds authenticated APIs for importing digiKam face rectangles and reading
 named Recognize faces. Face descriptors are generated locally with the model
 installed by Recognize.
@@ -12,6 +15,9 @@ installed by Recognize.
 Also reports a cheap fingerprint of your named faces, so Face Sync can tell
 whether anything changed without reading the whole library, and whether
 Recognize is busy so it can wait its turn.
+
+This app does nothing on its own. DigiMem itself is a desktop application for
+Linux, macOS and Windows, and is what talks to it.
 	]]></description>
 	<version>0.6.0</version>
 	<licence>agpl</licence>
@@ -20,8 +26,14 @@ Recognize is busy so it can wait its turn.
 	<types>
 		<filesystem/>
 	</types>
+	<documentation>
+		<admin>https://github.com/keithvassallomt/digikam-memories-sync/blob/main/docs/install-nextcloud-app.md</admin>
+	</documentation>
 	<category>integration</category>
 	<category>multimedia</category>
+	<website>https://github.com/keithvassallomt/digikam-memories-sync</website>
+	<bugs>https://github.com/keithvassallomt/digikam-memories-sync/issues</bugs>
+	<repository>https://github.com/keithvassallomt/digikam-memories-sync</repository>
 	<dependencies>
 		<php min-version="8.2"/>
 		<nextcloud min-version="33" max-version="35"/>
