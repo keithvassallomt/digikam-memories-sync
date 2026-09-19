@@ -330,7 +330,19 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          gh release create "v$VERSION" \
-            --title "DigiMem v$VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md" \
-            artifacts/*
+          # Re-runnable on purpose. A release that failed half way through, or
+          # a tag that had to be moved, re-runs this whole workflow; refusing
+          # because the release already exists would turn a recoverable moment
+          # into a manual one.
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already exists — updating it"
+            gh release edit "v$VERSION" \
+              --title "DigiMem v$VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+            gh release upload "v$VERSION" artifacts/* --clobber
+          else
+            gh release create "v$VERSION" \
+              --title "DigiMem v$VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
+              artifacts/*
+          fi
