@@ -59,6 +59,24 @@ export function create({ go, refresh }) {
             button('Check again', { onClick: test }))));
         return;
       }
+      // The app answers with its own account of what it has turned off and
+      // why. Saying "install or update it" over the top of that sends people
+      // to reinstall an app that is already current, which is what happens
+      // when Recognize is the thing that moved.
+      if (result.face_sync_reason) {
+        const version = result.recognize_version
+          ? ` Recognize on the server is ${result.recognize_version}.` : '';
+        install.appendChild(card(
+          h('h3', {}, 'The digiKam Face Sync app cannot do everything DigiMem needs'),
+          h('p', { class: 'muted' },
+            `The app is installed and answering. It reports: ${result.face_sync_reason}.${version}`),
+          h('p', { class: 'muted' },
+            'Syncing names still works. Creating new face boxes in Memories does not.'),
+          h('div', { class: 'row-tight' },
+            link('What to do about it', result.docs_url, 'button button-primary'),
+            button('Check again', { onClick: test }))));
+        return;
+      }
       install.appendChild(card(
         h('h3', {}, 'The digiKam Face Sync app in Nextcloud needs installing or updating'),
         h('p', { class: 'muted' },

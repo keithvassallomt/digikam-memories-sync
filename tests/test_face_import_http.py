@@ -42,6 +42,8 @@ class FaceImportHTTPTests(unittest.TestCase):
                 "create": True, "list": True, "assign": True, "confirmed": True,
                 # An older app does not advertise these, so they stay off.
                 "changes": False, "status": False,
+                # Nothing is wrong, so there is nothing to explain.
+                "reason": "", "recognize_version": "",
             },
         )
 
@@ -51,8 +53,38 @@ class FaceImportHTTPTests(unittest.TestCase):
             {
                 "create": False, "list": False, "assign": False, "confirmed": False,
                 "changes": False, "status": False,
+                "reason": "", "recognize_version": "",
             },
         )
+
+    def test_the_app_is_believed_when_it_says_why_it_cannot(self):
+        """An installed app that has turned a feature off explains itself, and
+        that explanation is the only thing that leads anywhere. Without it the
+        interface can only say "install or update the app", which is wrong in
+        exactly the case where the app is current and Recognize is what moved.
+        """
+        backend = self.make_backend()
+        backend._request = lambda *args, **kwargs: (
+            200,
+            {},
+            json.dumps(
+                {
+                    "apiVersion": 5,
+                    "createFaceDetection": False,
+                    "listFaceDetections": True,
+                    "assignFaceDetection": True,
+                    "changeFingerprint": True,
+                    "recognizeStatus": True,
+                    "recognizeVersion": "13.1.0",
+                    "reason": "This release supports Recognize 12.x",
+                }
+            ).encode(),
+        )
+        probed = backend._probe_face_sync_app()
+        self.assertFalse(probed["create"])
+        self.assertTrue(probed["list"], "reading faces still works")
+        self.assertEqual(probed["reason"], "This release supports Recognize 12.x")
+        self.assertEqual(probed["recognize_version"], "13.1.0")
 
     def test_a_newer_app_advertises_change_detection(self):
         backend = self.make_backend()

@@ -598,6 +598,8 @@ class AppService:
                 "install_url": requirements.face_sync_install_url,
                 "docs_url": requirements.face_sync_docs_url,
                 "recognize_install_url": requirements.recognize_install_url,
+                "face_sync_reason": requirements.face_sync_reason,
+                "recognize_version": requirements.recognize_version,
                 "ready": requirements.ready,
             }
         finally:

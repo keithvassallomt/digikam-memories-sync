@@ -15,6 +15,10 @@ class NextcloudRequirements:
     # Defaulted so the many tests that build this positionally keep working.
     recognize_install_url: str = ""
     face_sync_docs_url: str = ""
+    #: What the companion app says it has turned off, and why. Empty when it
+    #: answered happily, or when it did not answer at all.
+    face_sync_reason: str = ""
+    recognize_version: str = ""
 
     @property
     def ready(self) -> bool:

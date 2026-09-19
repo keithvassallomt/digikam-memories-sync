@@ -51,6 +51,12 @@ NO_CAPABILITIES = {
     "confirmed": False,
     "changes": False,
     "status": False,
+    # The companion app says why it has turned something off — an unsupported
+    # Recognize, a missing model, no Node binary. Dropping that leaves the
+    # interface guessing, and it guesses "the app needs installing", which is
+    # the one thing that is not wrong.
+    "reason": "",
+    "recognize_version": "",
 }
 
 
@@ -212,6 +218,8 @@ class NextcloudHTTP:
 
     supports_insert = False
     supports_export = False
+    face_sync_reason = ""
+    recognize_version = ""
     supports_assign = False
     supports_confirmed_insert = False
     # The descriptor confidence of the insert just made. 0.0 means the box was
@@ -285,6 +293,8 @@ class NextcloudHTTP:
         self.supports_confirmed_insert = capabilities["confirmed"]
         self.supports_change_fingerprint = capabilities["changes"]
         self.supports_recognize_status = capabilities["status"]
+        self.face_sync_reason = capabilities["reason"]
+        self.recognize_version = capabilities["recognize_version"]
         self.generates_face_vectors = self.supports_insert
 
     def _probe_recognize_installation(self) -> bool:
@@ -319,6 +329,8 @@ class NextcloudHTTP:
             face_sync_install_url=FACE_SYNC_APP_INSTALL_URL,
             recognize_install_url=RECOGNIZE_INSTALL_URL,
             face_sync_docs_url=FACE_SYNC_APP_DOCS_URL,
+            face_sync_reason=self.face_sync_reason,
+            recognize_version=self.recognize_version,
         )
 
     def face_import_url(self) -> str:
@@ -349,6 +361,8 @@ class NextcloudHTTP:
                 "confirmed": payload.get("confirmedFaceImport") is True,
                 "changes": payload.get("changeFingerprint") is True,
                 "status": payload.get("recognizeStatus") is True,
+                "reason": str(payload.get("reason") or ""),
+                "recognize_version": str(payload.get("recognizeVersion") or ""),
             }
             if capabilities["create"]:
                 LOG.info("Recognize face-import API available")
