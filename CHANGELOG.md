@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-09-17
+## [0.1.0] - 2026-09-19
 
 First release.
 
@@ -117,9 +117,10 @@ First release.
 
 #### Nextcloud companion app
 
-- `digikam_face_sync` 0.6.0, installed separately from Recognize so a Recognize
-  update cannot overwrite it. It creates detections Recognize is missing, reads
-  named faces, and reports a change fingerprint and whether Recognize is busy.
+- `digikam_face_sync` 0.6.0, available from the Nextcloud App Store and
+  installed separately from Recognize so a Recognize update cannot overwrite it.
+  It creates detections Recognize is missing, reads named faces, and reports a
+  change fingerprint and whether Recognize is busy.
 - Where the companion app is older than 0.5.0, change detection is left off and
   DigiMem falls back to its daily check.
 - Requires Nextcloud 33 to 35 and PHP 8.2 or later.
