@@ -259,7 +259,13 @@ class AppFoundationTests(unittest.TestCase):
         settings = SettingsStore(self.root / "config", use_keyring=False)
         state = StateStore(self.root / "state.sqlite3")
         backend = FakeBackend(
-            NextcloudRequirements(True, False, "https://keithvassallo.com")
+            NextcloudRequirements(
+                True,
+                False,
+                "https://apps.nextcloud.com/apps/digikam_face_sync",
+                recognize_install_url="https://apps.nextcloud.com/apps/recognize",
+                face_sync_docs_url="https://example.test/install-nextcloud-app.md",
+            )
         )
         service = AppService(settings, state, backend_factory=lambda *a, **k: backend)
         try:
@@ -272,7 +278,16 @@ class AppFoundationTests(unittest.TestCase):
                 }
             )
             self.assertFalse(result["ready"])
-            self.assertEqual(result["install_url"], "https://keithvassallo.com")
+            self.assertEqual(
+                result["install_url"],
+                "https://apps.nextcloud.com/apps/digikam_face_sync")
+            # The card is the only place most people learn the app is needed, so
+            # every route off it has to be carried to the interface.
+            self.assertEqual(
+                result["docs_url"], "https://example.test/install-nextcloud-app.md")
+            self.assertEqual(
+                result["recognize_install_url"],
+                "https://apps.nextcloud.com/apps/recognize")
             self.assertTrue(backend.closed)
         finally:
             state.close()

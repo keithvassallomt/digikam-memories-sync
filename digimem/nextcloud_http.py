@@ -32,7 +32,16 @@ from .paths import normalize_path, strip_nc_files_prefix
 
 LOG = logging.getLogger(__name__)
 
-FACE_SYNC_APP_INSTALL_URL = "https://keithvassallo.com"
+# Both apps have to be installed on the server, and a card in first-run setup
+# is the only place most people will be told so. It has to lead somewhere that
+# helps: the store page installs in a click for an admin, and the documentation
+# covers the manual route and the permissions for everyone else.
+FACE_SYNC_APP_INSTALL_URL = "https://apps.nextcloud.com/apps/digikam_face_sync"
+FACE_SYNC_APP_DOCS_URL = (
+    "https://github.com/keithvassallomt/digikam-memories-sync"
+    "/blob/main/docs/install-nextcloud-app.md"
+)
+RECOGNIZE_INSTALL_URL = "https://apps.nextcloud.com/apps/recognize"
 
 # What a missing or unreachable companion app looks like.
 NO_CAPABILITIES = {
@@ -308,6 +317,8 @@ class NextcloudHTTP:
             recognize_installed=self.recognize_installed,
             face_sync_installed=self.supports_insert and self.supports_export,
             face_sync_install_url=FACE_SYNC_APP_INSTALL_URL,
+            recognize_install_url=RECOGNIZE_INSTALL_URL,
+            face_sync_docs_url=FACE_SYNC_APP_DOCS_URL,
         )
 
     def face_import_url(self) -> str:

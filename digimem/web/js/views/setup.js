@@ -41,6 +41,11 @@ export function create({ go, refresh }) {
       nc_photos_path: photos.value.trim(),
     });
 
+    function link(text, href, cls) {
+      if (!href) return null;
+      return h('a', { class: cls, href, target: '_blank', rel: 'noopener' }, text);
+    }
+
     function showRequirements(result) {
       replace(install);
       if (result.ready) return;
@@ -48,7 +53,10 @@ export function create({ go, refresh }) {
         install.appendChild(card(
           h('h3', {}, 'Recognize is not installed in Nextcloud'),
           h('p', { class: 'muted' },
-            'DigiMem needs the Recognize app enabled for your account before it can read faces.')));
+            'DigiMem needs the Recognize app enabled for your account before it can read faces.'),
+          h('div', { class: 'row-tight' },
+            link('Get Recognize', result.recognize_install_url, 'button button-primary'),
+            button('Check again', { onClick: test }))));
         return;
       }
       install.appendChild(card(
@@ -56,9 +64,8 @@ export function create({ go, refresh }) {
         h('p', { class: 'muted' },
           'Recognize is working, but the companion app is missing a feature DigiMem needs.'),
         h('div', { class: 'row-tight' },
-          h('a', {
-            class: 'button', href: result.install_url, target: '_blank', rel: 'noopener',
-          }, 'Open the installation page'),
+          link('Get digiKam Face Sync', result.install_url, 'button button-primary'),
+          link('Installing it by hand', result.docs_url, 'button button-quiet'),
           button('Check again', { onClick: test }))));
     }
 

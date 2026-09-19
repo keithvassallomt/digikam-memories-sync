@@ -12,6 +12,9 @@ class NextcloudRequirements:
     recognize_installed: bool
     face_sync_installed: bool
     face_sync_install_url: str
+    # Defaulted so the many tests that build this positionally keep working.
+    recognize_install_url: str = ""
+    face_sync_docs_url: str = ""
 
     @property
     def ready(self) -> bool:

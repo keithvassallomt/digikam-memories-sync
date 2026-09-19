@@ -596,6 +596,8 @@ class AppService:
                 "recognize_installed": requirements.recognize_installed,
                 "face_sync_installed": requirements.face_sync_installed,
                 "install_url": requirements.face_sync_install_url,
+                "docs_url": requirements.face_sync_docs_url,
+                "recognize_install_url": requirements.recognize_install_url,
                 "ready": requirements.ready,
             }
         finally:
