@@ -63,7 +63,9 @@ release:
     read -rp "New DigiMem version: " version
     [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] \
         || die "'$version' is not a semantic version like 1.2.3."
-    [[ "$version" != "$current" ]] || die "$version is already the current version."
+    # The tag is the guard, not the version in the source. A first release is
+    # cut from a tree that already carries the number it is being released as,
+    # and refusing that would make the first release impossible.
     git rev-parse -q --verify "refs/tags/v$version" >/dev/null \
         && die "Tag v$version already exists."
 
