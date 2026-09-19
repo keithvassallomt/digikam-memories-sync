@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="ClusterCut Logo" width="64" />
+</p>
+
 # DigiMem
 
 **Two-way face sync between digiKam and Nextcloud Memories.**
