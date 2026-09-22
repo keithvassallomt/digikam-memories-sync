@@ -23,6 +23,12 @@ desktop = [
   "keyring>=25",
   "psutil>=5.9",
 ]
+# The macOS build only. A notification with a button has to be posted by the
+# application bundle, which means talking to UserNotifications directly.
+macos = [
+  "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+  "pyobjc-framework-UserNotifications>=10.0; sys_platform == 'darwin'",
+]
 
 [project.scripts]
 digimem = "digimem.entrypoint:main"

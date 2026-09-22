@@ -28,7 +28,14 @@ hidden = [
     "keyring.backends.chainer",
 ]
 if sys.platform == "darwin":
-    hidden += ["keyring.backends.macOS"]
+    # UserNotifications is reached through pyobjc's lazy loader, so nothing
+    # static ever sees it. Without these the macOS notification helper is in
+    # the bundle but has nothing to talk to.
+    hidden += [
+        "keyring.backends.macOS",
+        "Foundation",
+        "UserNotifications",
+    ]
 elif sys.platform == "win32":
     hidden += ["keyring.backends.Windows"]
 else:

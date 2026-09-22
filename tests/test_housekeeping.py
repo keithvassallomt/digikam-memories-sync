@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import time
 import unittest
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from digimem import desktop, notify
+from digimem import desktop, macos_notify, notify
 from digimem.app_service import AppService
 from digimem.settings import SettingsStore
 from digimem.state_store import StateStore
@@ -78,6 +80,202 @@ class DesktopSenderTest(unittest.TestCase):
                 "event_type": "connection.action_required",
             })
         self.assertIn("critical", run.call_args.args[0])
+
+
+class NotificationButtonTest(unittest.TestCase):
+    """A notification about a screen carries a button that opens it."""
+
+    def setUp(self):
+        desktop._notify_send_takes_actions.cache_clear()
+        self.addCleanup(desktop._notify_send_takes_actions.cache_clear)
+
+    def send(self, help_text="  -A, --action=[NAME=]Text", **extra):
+        opened = []
+        with patch("sys.platform", "linux"), \
+             patch("digimem.desktop.shutil.which", return_value="/usr/bin/notify-send"), \
+             patch("digimem.desktop.subprocess.run") as run, \
+             patch("digimem.desktop.subprocess.Popen") as popen:
+            run.return_value.returncode = 0
+            run.return_value.stdout = help_text
+            run.return_value.stderr = ""
+            popen.return_value.communicate.return_value = ("open", "")
+            popen.return_value.returncode = 0
+            ok = desktop.send(
+                "54 changes need attention", "Open DigiMem to retry.",
+                open_action=desktop.OpenAction(
+                    url="http://127.0.0.1:47818/#/runs/26",
+                    show=lambda: opened.append(True),
+                ),
+                **extra,
+            )
+        return ok, run, popen, opened
+
+    def test_the_button_is_asked_for_and_the_message_still_comes_last(self):
+        ok, _, popen, _ = self.send()
+        self.assertTrue(ok)
+        command = popen.call_args.args[0]
+        self.assertIn("--action", command)
+        self.assertIn("open=Open", command)
+        self.assertEqual(command[-2:], ["54 changes need attention", "Open DigiMem to retry."])
+
+    def test_pressing_it_opens_the_screen(self):
+        _, _, _, opened = self.send()
+        for thread in threading.enumerate():
+            if thread.name == "digimem-notification":
+                thread.join(timeout=5)
+        self.assertEqual(opened, [True])
+
+    def test_an_urgent_one_keeps_its_urgency(self):
+        _, _, popen, _ = self.send(urgent=True)
+        self.assertIn("critical", popen.call_args.args[0])
+
+    def test_a_notify_send_too_old_for_buttons_still_shows_the_message(self):
+        ok, run, popen, _ = self.send(help_text="  -u, --urgency=LEVEL")
+        self.assertTrue(ok)
+        popen.assert_not_called()
+        self.assertEqual(run.call_args.args[0][-2:],
+                         ["54 changes need attention", "Open DigiMem to retry."])
+
+    def test_a_notification_about_nothing_in_particular_has_no_button(self):
+        service = AppService.__new__(AppService)
+        self.assertIsNone(service._open_action({"target": ""}))
+
+    def test_the_button_opens_the_screen_the_message_names(self):
+        service = AppService.__new__(AppService)
+        service.settings = SettingsStore(Path("/tmp/digimem-test-config"), use_keyring=False)
+        with patch("digimem.launcher.screen_url", return_value="http://127.0.0.1:1/#/runs/26"):
+            action = service._open_action({"target": "/runs/26"})
+        self.assertEqual(action.url, "http://127.0.0.1:1/#/runs/26")
+        with patch("digimem.launcher.open_ui") as open_ui:
+            action.show()
+        self.assertEqual(open_ui.call_args.kwargs["target"], "/runs/26")
+
+
+class MacosNotifierTest(unittest.TestCase):
+    """The helper that lets a macOS notification be acted on.
+
+    Only the plumbing is here. Whether AppKit puts a button on the screen is
+    not something a Linux test runner can be asked.
+    """
+
+    def setUp(self):
+        desktop._macos_notifier.cache_clear()
+        self.addCleanup(desktop._macos_notifier.cache_clear)
+        self.action = desktop.OpenAction(
+            url="http://127.0.0.1:47818/#/runs/26", show=lambda: self.opened.append(True)
+        )
+        self.opened = []
+
+    def probe(self, *, frozen=True, returncode=0):
+        run = patch("digimem.desktop.subprocess.run").start()
+        self.addCleanup(patch.stopall)
+        run.return_value.returncode = returncode
+        run.return_value.stdout = ""
+        run.return_value.stderr = "no bundle"
+        patch("digimem.relaunch.frozen", return_value=frozen).start()
+        patch("digimem.relaunch.command", return_value=["/DigiMem.app/x", "notify"]).start()
+        return run
+
+    def test_an_unfrozen_digimem_has_no_bundle_to_post_from(self):
+        self.probe(frozen=False)
+        self.assertIsNone(desktop._macos_notifier())
+
+    def test_a_bundle_macos_will_not_talk_to_is_not_used(self):
+        self.probe(returncode=1)
+        self.assertIsNone(desktop._macos_notifier())
+
+    def test_the_probe_shows_nothing(self):
+        run = self.probe()
+        self.assertEqual(desktop._macos_notifier(), ["/DigiMem.app/x", "notify"])
+        self.assertEqual(run.call_args.args[0][-1], "--probe")
+
+    def test_the_helper_is_asked_for_the_button(self):
+        self.probe()
+        with patch("sys.platform", "darwin"), \
+             patch("digimem.desktop.shutil.which", return_value="/usr/bin/osascript"), \
+             patch("digimem.desktop.subprocess.Popen") as popen:
+            popen.return_value.communicate.return_value = ("open", "")
+            popen.return_value.returncode = 0
+            self.assertTrue(desktop.send("54 changes", "Retry.", open_action=self.action))
+        command = popen.call_args.args[0]
+        self.assertEqual(command[:2], ["/DigiMem.app/x", "notify"])
+        self.assertEqual(command[command.index("--title") + 1], "54 changes")
+        self.assertEqual(command[command.index("--action") + 1], "Open")
+
+    def test_a_helper_that_cannot_post_still_gets_the_message_shown(self):
+        run = self.probe()
+        with patch("sys.platform", "darwin"), \
+             patch("digimem.desktop.shutil.which", return_value="/usr/bin/osascript"), \
+             patch("digimem.desktop.subprocess.Popen") as popen:
+            popen.return_value.communicate.return_value = ("", "Notifications are off")
+            popen.return_value.returncode = 1
+            desktop.send("54 changes", "Retry.", open_action=self.action)
+        for thread in threading.enumerate():
+            if thread.name == "digimem-notification":
+                thread.join(timeout=5)
+        self.assertEqual(run.call_args.args[0][0], "osascript")
+        self.assertIn("display notification", run.call_args.args[0][2])
+
+    def test_a_message_about_nothing_in_particular_needs_no_helper(self):
+        run = self.probe()
+        with patch("sys.platform", "darwin"), \
+             patch("digimem.desktop.shutil.which", return_value="/usr/bin/osascript"), \
+             patch("digimem.desktop.subprocess.Popen") as popen:
+            desktop.send("Sync complete", "Nothing to do.")
+        popen.assert_not_called()
+        self.assertEqual(run.call_args.args[0][0], "osascript")
+
+
+class MacosHelperTest(unittest.TestCase):
+    def test_it_refuses_where_there_is_no_notification_centre(self):
+        """Every platform but the macOS build, which is where it falls back."""
+        self.assertEqual(macos_notify.main(["--probe"]), 1)
+        self.assertEqual(macos_notify.main(["--title", "x", "--action", "Open"]), 1)
+
+
+class WindowsToastTest(unittest.TestCase):
+    """A toast acts through the shell, so it needs no COM server of its own."""
+
+    def toast(self, open_action=None):
+        with patch("sys.platform", "win32"), \
+             patch("digimem.desktop.shutil.which", return_value="C:/pwsh.exe"), \
+             patch("digimem.desktop.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stderr = ""
+            desktop.send("54 changes need attention", "Open DigiMem to retry.",
+                         open_action=open_action)
+        return run.call_args.kwargs["input"]
+
+    @staticmethod
+    def xml(script):
+        start = script.index("$xml.LoadXml('") + len("$xml.LoadXml('")
+        return script[start:script.index("')", start)]
+
+    def test_the_button_hands_the_address_to_the_shell(self):
+        action = desktop.OpenAction(url="http://127.0.0.1:47818/#/runs/26", show=lambda: None)
+        document = ET.fromstring(self.xml(self.toast(action)))
+        self.assertEqual(document.get("activationType"), "protocol")
+        self.assertEqual(document.get("launch"), action.url)
+        pressed = document.find("actions/action")
+        self.assertEqual(pressed.get("activationType"), "protocol")
+        self.assertEqual(pressed.get("arguments"), action.url)
+        self.assertEqual(pressed.get("content"), "Open")
+
+    def test_a_message_about_nothing_in_particular_gets_no_button(self):
+        document = ET.fromstring(self.xml(self.toast()))
+        self.assertIsNone(document.find("actions"))
+        self.assertIsNone(document.get("launch"))
+
+    def test_markup_in_a_name_cannot_break_the_toast(self):
+        with patch("sys.platform", "win32"), \
+             patch("digimem.desktop.shutil.which", return_value="C:/pwsh.exe"), \
+             patch("digimem.desktop.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stderr = ""
+            desktop.send("Anique & <Roel>", "It's done.")
+        document = ET.fromstring(self.xml(run.call_args.kwargs["input"]))
+        texts = [node.text for node in document.findall("visual/binding/text")]
+        self.assertEqual(texts, ["Anique & <Roel>", "It's done."])
 
 
 class ServiceHousekeepingTest(unittest.TestCase):

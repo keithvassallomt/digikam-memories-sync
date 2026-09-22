@@ -5,7 +5,9 @@ import argparse
 import sys
 from pathlib import Path
 
-COMMANDS = ("ui", "run", "service", "autostart", "shortcuts")
+# "notify" is DigiMem talking to itself: the macOS notification helper runs as
+# a process of its own, so it needs a command, but nobody types it.
+COMMANDS = ("ui", "run", "service", "autostart", "shortcuts", "notify")
 
 USAGE = """digimem [command]
 
@@ -42,6 +44,10 @@ def main(argv: list[str] | None = None) -> int:
         return _service(args)
     if command == "autostart":
         return _autostart(args)
+    if command == "notify":
+        from .macos_notify import main as notify_main
+
+        return notify_main(args)
     return _shortcuts(args)
 
 

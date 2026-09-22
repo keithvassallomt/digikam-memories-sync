@@ -61,6 +61,20 @@ def wait_for_service(
     return None
 
 
+def ui_url(info: dict, target: str = "") -> str:
+    """The address of one screen in a running interface."""
+    url = service_url(info)
+    if target:
+        url = url.rstrip("/") + "/#" + target.lstrip("#/")
+    return url
+
+
+def screen_url(config_dir: str | Path | None = None, target: str = "") -> str:
+    """The address of one screen, or empty when no service has published one."""
+    info = read_service_info(config_dir)
+    return ui_url(info, target) if info else ""
+
+
 def open_ui(
     config_dir: str | Path | None = None,
     *,
@@ -79,9 +93,7 @@ def open_ui(
             )
             return 1
 
-    url = service_url(info)
-    if target:
-        url = url.rstrip("/") + "/#" + target.lstrip("#/")
+    url = ui_url(info, target)
     print(f"DigiMem is running at {url}")
     if not no_browser:
         webbrowser.open(url)

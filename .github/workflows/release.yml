@@ -244,7 +244,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip pyinstaller
-          python -m pip install '.[desktop,database]'
+          python -m pip install '.[desktop,database,macos]'
           pyinstaller --noconfirm --clean packaging/pyinstaller/digimem.spec
 
       # The certificate goes into a throwaway keychain, so nothing is left

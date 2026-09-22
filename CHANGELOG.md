@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the published `.deb` rather than building from source, so the launcher, the
   menu entry and the icon are the files every other Linux user gets.
 
+- A desktop notification carries an Open button that goes straight to the
+  screen it is about, so a message about changes needing attention is one
+  press away from them. All three desktops do it, each the only way it can:
+  Linux waits on `notify-send --action`, Windows hands the address to the
+  shell through a toast's protocol activation, which needs no registered COM
+  server, and macOS posts from inside DigiMem.app through a helper that holds
+  a run loop, because a notification there belongs to an application and its
+  answer arrives on a loop a background service has not got. A macOS DigiMem
+  run from a checkout rather than the bundle still shows the message, with
+  nothing to press.
+
 ### Fixed
 
 - Applying no longer refuses a new face box because Recognize found the same

@@ -725,6 +725,23 @@ class AppService:
 
         return bool(self._cached("recognize_busy", 300.0, probe))
 
+    def _open_action(self, row: dict[str, Any]) -> desktop.OpenAction | None:
+        """Where pressing the notification's button goes, if anywhere.
+
+        Every screen this service can raise a notification about is reachable
+        from the running interface, so the button is the same one the desktop
+        shortcut presses, pointed at the screen the message is about.
+        """
+        from . import launcher
+
+        target = str(row.get("target", "")).strip()
+        if not target:
+            return None
+        return desktop.OpenAction(
+            url=launcher.screen_url(self._explicit_config_dir(), target),
+            show=lambda: launcher.open_ui(self.settings.root, target=target),
+        )
+
     def deliver_desktop_notifications(self) -> int:
         """Raise anything still unannounced, for when no window is open.
 
@@ -744,7 +761,7 @@ class AppService:
                 self.state.assign_notification_channel([identifier], notify.SUPPRESSED)
                 continue
             self.state.assign_notification_channel([identifier], notify.OPERATING_SYSTEM)
-            if desktop.send_notification(row):
+            if desktop.send_notification(row, open_action=self._open_action(row)):
                 sent += 1
             # Marked either way. The inbox is the record; a desktop that
             # cannot show one must not make it repeat forever.
