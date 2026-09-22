@@ -14,6 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the published `.deb` rather than building from source, so the launcher, the
   menu entry and the icon are the files every other Linux user gets.
 
+### Fixed
+
+- Applying no longer refuses a new face box because Recognize found the same
+  face first. On photos added shortly before a sync, Recognize often detects
+  its own faces between the preview and the apply, leaving an unnamed
+  detection under a box digiKam had asked for. DigiMem now names that
+  detection, which is what a preview taken a moment later would have proposed,
+  instead of reporting that a different Memories face was in the way. A face
+  genuinely carrying another name is still refused, and now says whose. The
+  same goes the other way: a detection Recognize replaced after the preview is
+  named rather than reported as changed.
+
+- Naming a face in digiKam takes away the unnamed box digiKam's own detector
+  had left under it, which is what digiKam does when somebody confirms a face.
+  Before, the photo kept both, so one face showed twice: once with the name
+  just written and once as a stranger. A face marked Ignored is a decision and
+  stays, and so does a suggestion digiKam made for a real person.
+
 ## [0.2.0] - 2026-09-19
 
 ### Changed

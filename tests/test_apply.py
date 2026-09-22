@@ -58,6 +58,10 @@ def make_writable_digikam(path: Path) -> None:
                 VALUES (3, 2, 'photo.jpg', 1, 10, 'hash');
             INSERT INTO ImageInformation VALUES (3, 1, 1000, 800);
             INSERT INTO Tags VALUES (4, 0, 'People', NULL, NULL);
+            INSERT INTO Tags VALUES (5, 4, 'Unknown', NULL, NULL);
+            INSERT INTO Tags VALUES (6, 4, 'Ignored', NULL, NULL);
+            INSERT INTO TagProperties VALUES (5, 'unknownPerson', '');
+            INSERT INTO TagProperties VALUES (6, 'ignoredPerson', '');
             INSERT INTO Tags VALUES (34, 4, 'Gail Vassallo', NULL, NULL);
             INSERT INTO Tags VALUES (44, 4, 'Angie Galea', NULL, NULL);
             INSERT INTO TagProperties VALUES (34, 'person', 'Gail Vassallo');
@@ -613,6 +617,169 @@ class ConfirmedByDefaultTests(unittest.TestCase):
         backend = FakeApplyBackend()
         result = self.insert(backend)
         self.assertNotIn("score", result)
+
+
+class RecognizeCaughtUpTests(unittest.TestCase):
+    """Recognize finds its own faces on photos added minutes ago.
+
+    When it does so between a preview and its apply, a box the preview called
+    new has a Memories detection sitting under it that nobody has named yet.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.database = Path(self.temp.name) / "digikam4.db"
+        make_writable_digikam(self.database)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def insert(self, backend):
+        with DigikamWriter(self.database) as writer:
+            executor = ApplyExecutor(
+                backend=backend, digikam=writer, nextcloud_photos_path="Photos"
+            )
+            return executor.execute({
+                "target": "memories", "operation": "insert_memories",
+                "path": "2026/photo.jpg", "person": "April Vassallo",
+                "rect": [0.6, 0.2, 0.2, 0.2], "nc_file_id": 7,
+                "confirmed_face": True,
+            })
+
+    @staticmethod
+    def detection(person, rect, detection_id=41, cluster=None):
+        return FaceRegion(
+            person=person, rect=Rect(*rect), source="nextcloud",
+            nc_file_id=7, nc_detection_id=detection_id, nc_cluster_id=cluster,
+        )
+
+    def test_an_unnamed_detection_underneath_is_named_rather_than_doubled(self):
+        found = self.detection("", (0.61, 0.21, 0.2, 0.2))
+        backend = FakeApplyBackend([found])
+        result = self.insert(backend)
+        self.assertIsNone(backend.last_insert)
+        self.assertEqual(found.person, "April Vassallo")
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["nc_detection_id"], 41)
+
+    def test_the_closest_of_several_unnamed_detections_takes_the_name(self):
+        far = self.detection("", (0.55, 0.15, 0.2, 0.2), detection_id=41)
+        near = self.detection("", (0.6, 0.2, 0.2, 0.2), detection_id=42)
+        backend = FakeApplyBackend([far, near])
+        self.assertEqual(self.insert(backend)["nc_detection_id"], 42)
+        self.assertEqual(near.person, "April Vassallo")
+        self.assertEqual(far.person, "")
+
+    def test_a_name_already_on_the_region_is_still_refused(self):
+        backend = FakeApplyBackend([self.detection("Gail Vassallo", (0.61, 0.21, 0.2, 0.2))])
+        with self.assertRaises(RuntimeError) as raised:
+            self.insert(backend)
+        self.assertIn("Gail Vassallo", str(raised.exception))
+        self.assertIsNone(backend.last_insert)
+
+    def test_the_same_name_underneath_is_left_alone(self):
+        backend = FakeApplyBackend([self.detection("April Vassallo", (0.61, 0.21, 0.2, 0.2))])
+        result = self.insert(backend)
+        self.assertFalse(result["changed"])
+        self.assertIsNone(backend.last_insert)
+
+    def test_a_detection_that_does_not_share_the_region_does_not_stop_the_insert(self):
+        backend = FakeApplyBackend([self.detection("", (0.1, 0.1, 0.2, 0.2))])
+        self.assertTrue(self.insert(backend)["changed"])
+        self.assertIsNotNone(backend.last_insert)
+
+    def test_a_replaced_detection_is_named_rather_than_refused(self):
+        """Recognize re-detects a photo it has seen when the file changes."""
+        backend = FakeApplyBackend([self.detection("", (0.61, 0.21, 0.2, 0.2), detection_id=77)])
+        with DigikamWriter(self.database) as writer:
+            executor = ApplyExecutor(
+                backend=backend, digikam=writer, nextcloud_photos_path="Photos"
+            )
+            result = executor.execute({
+                "target": "memories", "operation": "assign_memories",
+                "path": "2026/photo.jpg", "person": "April Vassallo",
+                "rect": [0.6, 0.2, 0.2, 0.2], "nc_file_id": 7,
+                "nc_detection_id": 41,
+            })
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["nc_detection_id"], 77)
+
+    def test_a_replaced_detection_carrying_a_name_is_still_refused(self):
+        backend = FakeApplyBackend([
+            self.detection("Gail Vassallo", (0.61, 0.21, 0.2, 0.2), detection_id=77)
+        ])
+        with DigikamWriter(self.database) as writer:
+            executor = ApplyExecutor(
+                backend=backend, digikam=writer, nextcloud_photos_path="Photos"
+            )
+            with self.assertRaises(RuntimeError):
+                executor.execute({
+                    "target": "memories", "operation": "assign_memories",
+                    "path": "2026/photo.jpg", "person": "April Vassallo",
+                    "rect": [0.6, 0.2, 0.2, 0.2], "nc_file_id": 7,
+                    "nc_detection_id": 41,
+                })
+
+    def test_a_backend_without_the_companion_app_resolves_a_cluster_first(self):
+        """The DB backend names a face by moving it into a person's cluster."""
+        backend = FakeApplyBackend([self.detection("", (0.61, 0.21, 0.2, 0.2))])
+        backend.supports_assign = False
+        asked = []
+        backend.get_or_create_cluster = lambda person: asked.append(person) or 5
+        self.insert(backend)
+        self.assertEqual(asked, ["April Vassallo"])
+
+
+class DigikamOwnDetectionTests(unittest.TestCase):
+    """digiKam parks a face its detector found under Unknown until named."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.database = Path(self.temp.name) / "digikam4.db"
+        make_writable_digikam(self.database)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def park(self, tag_id, prop, rect):
+        with closing(sqlite3.connect(self.database)) as connection:
+            connection.execute(
+                "INSERT INTO ImageTagProperties VALUES (3, ?, ?, ?)",
+                (tag_id, prop, rect),
+            )
+            connection.commit()
+
+    def create(self, rect=(0.6, 0.2, 0.2, 0.3)):
+        with DigikamWriter(self.database) as writer:
+            return writer.create_face("2026/photo.jpg", "April Vassallo", rect, image_id=3)
+
+    def remaining(self, prop):
+        with closing(sqlite3.connect(self.database)) as connection:
+            return connection.execute(
+                "SELECT COUNT(*) FROM ImageTagProperties WHERE property = ?", (prop,)
+            ).fetchone()[0]
+
+    def test_naming_a_face_takes_away_the_unknown_box_under_it(self):
+        self.park(5, "autodetectedFace", '<rect x="610" y="170" width="190" height="230"/>')
+        result = self.create()
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["cleared_unnamed"], 1)
+        self.assertEqual(self.remaining("autodetectedFace"), 0)
+
+    def test_an_unknown_box_somewhere_else_in_the_photo_is_left_alone(self):
+        self.park(5, "autodetectedFace", '<rect x="10" y="10" width="100" height="120"/>')
+        self.assertEqual(self.create()["cleared_unnamed"], 0)
+        self.assertEqual(self.remaining("autodetectedFace"), 1)
+
+    def test_a_face_marked_ignored_is_a_decision_and_stays(self):
+        self.park(6, "ignoredFace", '<rect x="610" y="170" width="190" height="230"/>')
+        self.assertEqual(self.create()["cleared_unnamed"], 0)
+        self.assertEqual(self.remaining("ignoredFace"), 1)
+
+    def test_a_suggestion_digikam_made_for_a_real_person_is_left_alone(self):
+        self.park(34, "autodetectedFace", '<rect x="610" y="170" width="190" height="230"/>')
+        self.assertEqual(self.create()["cleared_unnamed"], 0)
+        self.assertEqual(self.remaining("autodetectedFace"), 1)
 
 
 class DigikamProbeTests(unittest.TestCase):

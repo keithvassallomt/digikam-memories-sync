@@ -183,39 +183,15 @@ class ApplyExecutor:
 
     @staticmethod
     def _overlap(faces: list[FaceRegion], rect: Rect) -> list[FaceRegion]:
-        return [face for face in faces if face.rect.iou(rect) >= 0.4]
+        """Faces sharing this region, the closest fit first."""
+        found = [face for face in faces if face.rect.iou(rect) >= 0.4]
+        found.sort(key=lambda face: face.rect.iou(rect), reverse=True)
+        return found
 
-    def _assign_memories(self, action: dict[str, Any]) -> dict[str, Any]:
-        nc_file, faces = self._remote(action)
-        person = sanitize_person_name(str(action["person"])).strip()
-        detection_id = action.get("nc_detection_id")
-        face = next(
-            (candidate for candidate in faces if candidate.nc_detection_id == detection_id),
-            None,
-        )
-        wanted = Rect(*map(float, action["rect"])).clamp()
-        if face is None:
-            same = [candidate for candidate in self._overlap(faces, wanted) if person_names_match(candidate.person, person)]
-            if same:
-                face = same[0]
-                return {
-                    "changed": False,
-                    "nc_file_id": nc_file.file_id,
-                    "nc_detection_id": face.nc_detection_id,
-                }
-            raise RuntimeError(f"The Memories face changed after the preview: {action['path']}")
-        if person_names_match(face.person, person):
-            return {
-                "changed": False,
-                "nc_file_id": nc_file.file_id,
-                "nc_detection_id": face.nc_detection_id,
-            }
-        expected_person = sanitize_person_name(str(action.get("old_person") or "")).strip()
-        if expected_person:
-            if not person_names_match(face.person, expected_person):
-                raise RuntimeError(f"The Memories face name changed after the preview: {action['path']}")
-        elif face.person:
-            raise RuntimeError(f"The Memories face was named after the preview: {action['path']}")
+    def _name_existing(
+        self, face: FaceRegion, person: str, nc_file: NextcloudFile
+    ) -> dict[str, Any]:
+        """Put a name on a detection Memories already holds."""
         if self.backend is None:
             raise RuntimeError("The Nextcloud connection is unavailable.")
         cluster = (
@@ -230,6 +206,52 @@ class ApplyExecutor:
             "nc_detection_id": face.nc_detection_id,
         }
 
+    def _assign_memories(self, action: dict[str, Any]) -> dict[str, Any]:
+        nc_file, faces = self._remote(action)
+        person = sanitize_person_name(str(action["person"])).strip()
+        detection_id = action.get("nc_detection_id")
+        face = next(
+            (candidate for candidate in faces if candidate.nc_detection_id == detection_id),
+            None,
+        )
+        wanted = Rect(*map(float, action["rect"])).clamp()
+        if face is None:
+            # The detection the preview named is gone. Recognize re-detects a
+            # photo it has already seen whenever the file changes, so what
+            # stands here now may be the same face under a new id.
+            overlaps = self._overlap(faces, wanted)
+            same = [
+                candidate for candidate in overlaps
+                if person_names_match(candidate.person, person)
+            ]
+            if same:
+                face = same[0]
+                return {
+                    "changed": False,
+                    "nc_file_id": nc_file.file_id,
+                    "nc_detection_id": face.nc_detection_id,
+                }
+            unnamed = [
+                candidate for candidate in overlaps
+                if not sanitize_person_name(candidate.person).strip()
+            ]
+            if unnamed:
+                return self._name_existing(unnamed[0], person, nc_file)
+            raise RuntimeError(f"The Memories face changed after the preview: {action['path']}")
+        if person_names_match(face.person, person):
+            return {
+                "changed": False,
+                "nc_file_id": nc_file.file_id,
+                "nc_detection_id": face.nc_detection_id,
+            }
+        expected_person = sanitize_person_name(str(action.get("old_person") or "")).strip()
+        if expected_person:
+            if not person_names_match(face.person, expected_person):
+                raise RuntimeError(f"The Memories face name changed after the preview: {action['path']}")
+        elif face.person:
+            raise RuntimeError(f"The Memories face was named after the preview: {action['path']}")
+        return self._name_existing(face, person, nc_file)
+
     def _insert_memories(self, action: dict[str, Any]) -> dict[str, Any]:
         nc_file, faces = self._remote(action)
         person = sanitize_person_name(str(action["person"])).strip()
@@ -243,7 +265,22 @@ class ApplyExecutor:
                 "nc_detection_id": same[0].nc_detection_id,
             }
         if overlaps:
-            raise RuntimeError(f"A different Memories face now overlaps the approved region in {action['path']}.")
+            unnamed = [
+                face for face in overlaps
+                if not sanitize_person_name(face.person).strip()
+            ]
+            if unnamed:
+                # Recognize found this face for itself somewhere between the
+                # preview and now, which is what happens to photos added
+                # minutes earlier. Naming its detection is what a preview taken
+                # a moment later would have proposed. Laying a second box over
+                # one Recognize already has is not.
+                return self._name_existing(unnamed[0], person, nc_file)
+            named = ", ".join(sorted({face.person for face in overlaps}))
+            raise RuntimeError(
+                f"A Memories face named {named} now overlaps the approved "
+                f"region in {action['path']}."
+            )
         if self.backend is None:
             raise RuntimeError("The Nextcloud connection is unavailable.")
         cluster = self.backend.get_or_create_cluster(person)

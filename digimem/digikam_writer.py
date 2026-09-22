@@ -27,6 +27,13 @@ class DigikamChangedError(RuntimeError):
 
 DIGIKAM_PROCESS_NAMES = frozenset({"digikam", "digikam.exe"})
 
+#: Where digiKam parks a rectangle its detector found. A confirmed face is a
+#: ``tagRegion`` under the person's own tag, so the two never mix.
+DETECTED_FACE_PROPERTY = "autodetectedFace"
+#: The tags digiKam holds those rectangles under while nobody has said who
+#: they are. ``ignoredPerson`` is deliberately not here: Ignored is a decision.
+UNNAMED_FACE_PROPERTIES = ("unknownPerson", "unconfirmedPerson")
+
 
 def _process_ids_from_proc() -> list[int]:
     """Read /proc directly, so Linux needs no dependency at all."""
@@ -197,6 +204,7 @@ class DigikamWriter:
             self.close()
             raise ValueError("The digiKam database does not have the expected face tables.")
         self._person_cache: dict[str, int] = {}
+        self._unnamed_tags: set[int] | None = None
 
     def close(self) -> None:
         self.conn.close()
@@ -298,14 +306,16 @@ class DigikamWriter:
         h = max(1, min(height - y, round(clamped.h * height)))
         return f'<rect x="{x}" y="{y}" width="{w}" height="{h}"/>'
 
-    def _face_rows(self, image: sqlite3.Row) -> list[dict[str, Any]]:
+    def _face_rows(
+        self, image: sqlite3.Row, *, prop: str = "tagRegion"
+    ) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             """SELECT itp.rowid, itp.tagid, itp.value, t.name,
                       COALESCE((SELECT value FROM TagProperties
                                 WHERE tagid = itp.tagid AND property = 'person' LIMIT 1), t.name) AS person
                FROM ImageTagProperties itp JOIN Tags t ON t.id = itp.tagid
-               WHERE itp.imageid = ? AND itp.property = 'tagRegion'""",
-            (int(image["image_id"]),),
+               WHERE itp.imageid = ? AND itp.property = ?""",
+            (int(image["image_id"]), prop),
         ).fetchall()
         out = []
         for row in rows:
@@ -315,6 +325,38 @@ class DigikamWriter:
             if rect is not None:
                 out.append({"row": row, "rect": rect})
         return out
+
+    def _unnamed_face_tags(self) -> set[int]:
+        """The tag ids digiKam keeps its own unidentified faces under."""
+        if self._unnamed_tags is None:
+            rows = self.conn.execute(
+                "SELECT tagid FROM TagProperties WHERE property IN (?, ?)",
+                UNNAMED_FACE_PROPERTIES,
+            ).fetchall()
+            self._unnamed_tags = {int(row[0]) for row in rows}
+        return self._unnamed_tags
+
+    def _clear_unnamed_box(self, image: sqlite3.Row, rect: Rect) -> int:
+        """Take away digiKam's own unnamed rectangle for a face just named.
+
+        digiKam removes it itself when somebody confirms a face, and showing
+        the same face twice, once with the name just written and once as a
+        stranger, is what leaving it behind would look like.
+        """
+        removed = 0
+        for face in self._face_rows(image, prop=DETECTED_FACE_PROPERTY):
+            if int(face["row"]["tagid"]) not in self._unnamed_face_tags():
+                # A suggestion digiKam made for a real person. Its own
+                # business, and not this face's to withdraw.
+                continue
+            if face["rect"].iou(rect) < 0.4:
+                continue
+            self.conn.execute(
+                "DELETE FROM ImageTagProperties WHERE rowid = ?",
+                (int(face["row"]["rowid"]),),
+            )
+            removed += 1
+        return removed
 
     def locate_face(
         self, path: str, person: str, rect: tuple[float, float, float, float],
@@ -372,11 +414,13 @@ class DigikamWriter:
                     (int(image["image_id"]), tag_id, "faceToTrain", value),
                 ],
             )
+            cleared = self._clear_unnamed_box(image, wanted)
             self.conn.commit()
             return {
                 "changed": True,
                 "digikam_image_id": int(image["image_id"]),
                 "digikam_tag_id": tag_id,
+                "cleared_unnamed": cleared,
             }
         except Exception:
             self.conn.rollback()
