@@ -182,9 +182,16 @@ def run_service(
     *,
     verbose: bool = False,
     once: bool = False,
+    restartable: bool = True,
     on_start: Callable[[Any], None] | None = None,
 ) -> int:
-    """Run until stopped. Returns 3 when another service already holds the lock."""
+    """Run until stopped. Returns 3 when another service already holds the lock.
+
+    ``restartable`` offers the interface a restart, which stops this process
+    and starts a detached replacement. A service run in a terminal turns it
+    off: replacing that with a background process is not what anyone watching
+    the output asked for.
+    """
     root = config_root(config_dir)
     root.mkdir(parents=True, exist_ok=True)
     lock = ServiceLock(root / LOCK_NAME)
@@ -230,6 +237,11 @@ def run_service(
             LOG.info("Stopping on signal %s", signum)
             threading.Thread(target=server.shutdown, daemon=True).start()
 
+        if restartable and not once:
+            server.app.stop_for_restart = lambda: threading.Thread(
+                target=server.shutdown, daemon=True
+            ).start()
+
         for name in ("SIGTERM", "SIGINT", "SIGBREAK"):
             value = getattr(signal, name, None)
             if value is not None:
@@ -269,6 +281,21 @@ def run_service(
             finally:
                 server.server_close()
         lock.release()
+        if server is not None and server.app.restart_wanted:
+            # Only now: the replacement needs the lock and the port that this
+            # process has just this moment given up.
+            _start_replacement(config_dir)
+
+
+def _start_replacement(config_dir: str | Path | None) -> None:
+    """Start the service that takes over from this one."""
+    from .launcher import start_service_detached
+
+    try:
+        start_service_detached(config_dir)
+        LOG.info("Replacement service started")
+    except OSError:
+        LOG.exception("The replacement service could not be started")
 
 
 def _now() -> str:

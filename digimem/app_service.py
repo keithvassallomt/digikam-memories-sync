@@ -105,6 +105,11 @@ def discover_digikam_databases() -> list[str]:
     return found
 
 
+#: Long enough for a restart's reply to reach the page that asked for it
+#: before the socket it came in on goes away.
+RESTART_DELAY_SECONDS = 0.5
+
+
 class AppService:
     def __init__(
         self,
@@ -127,6 +132,10 @@ class AppService:
         self._client_seen: float = 0.0
         self._client_visible = False
         self._client_can_notify = False
+        # Set by a service that knows how to put a replacement in its place.
+        # Nothing else can restart, so nothing else offers to.
+        self.stop_for_restart: Callable[[], None] | None = None
+        self.restart_wanted = False
 
     def _cached(self, key: str, seconds: float, produce: Callable[[], Any]) -> Any:
         now = time.monotonic()
@@ -174,6 +183,56 @@ class AppService:
             "config_dir": str(self.settings.root),
             "autostart": login,
             "shortcut": shortcuts.status(),
+            "restartable": (
+                self.stop_for_restart is not None or autostart.supervisor() is not None
+            ),
+        }
+
+    def restart_service(self) -> dict[str, Any]:
+        """Leave a fresh service running in place of this one.
+
+        Whoever is in charge does it. Under a login supervisor that is the
+        supervisor, because a job that replaces itself behind its back is one
+        the supervisor no longer knows about. Otherwise this process starts the
+        replacement itself, once it has let go of both the lock and the port.
+        """
+        from . import autostart
+
+        in_charge = autostart.supervisor()
+        if in_charge is None and self.stop_for_restart is None:
+            raise ValueError(
+                "This DigiMem is not running as a background service, so there "
+                "is nothing to restart."
+            )
+        if self.active_run_id() is not None:
+            raise ValueError(
+                "A sync is running. Wait for it to finish, then restart."
+            )
+        from .service import read_service_info
+
+        published = read_service_info(self._explicit_config_dir()) or {}
+
+        def stop() -> None:
+            try:
+                if in_charge is not None:
+                    autostart.restart_supervised(in_charge)
+                    return
+                self.restart_wanted = True
+                self.stop_for_restart()  # type: ignore[misc]
+            except Exception:
+                LOG.exception("The restart could not be carried out")
+
+        LOG.info(
+            "Restarting on request from the interface (%s)",
+            in_charge[0] if in_charge else "on its own",
+        )
+        # Delayed, so the reply reaches the page that asked before the socket
+        # it came in on goes away.
+        threading.Timer(RESTART_DELAY_SECONDS, stop).start()
+        return {
+            "restarting": True,
+            "port": published.get("port"),
+            "by": in_charge[0] if in_charge else "digimem",
         }
 
     def set_autostart(self, payload: dict[str, Any]) -> dict[str, Any]:

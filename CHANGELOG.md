@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run from a checkout rather than the bundle still shows the message, with
   nothing to press.
 
+- Settings can restart the background service, so picking up a new version no
+  longer means finding the right thing to kill. Whoever is in charge does it:
+  under a systemd user unit or a launchd agent DigiMem asks the supervisor,
+  because a job that replaces itself behind its supervisor's back is one the
+  supervisor no longer knows about, would not bring back after a crash, and
+  would report as stopped while it ran. With no supervisor DigiMem starts the
+  replacement itself, once it has given up the lock and the port. A sync in
+  progress has to finish first, and a service run in a terminal does not offer
+  a restart at all.
+
 ### Fixed
 
 - Applying no longer refuses a new face box because Recognize found the same

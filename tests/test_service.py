@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -96,6 +98,61 @@ class ServiceInfoTest(unittest.TestCase):
         self.assertFalse(service_is_live({"port": 1, "token": "x"}, timeout=0.3))
 
 
+class SupervisorTest(unittest.TestCase):
+    """Who is in charge of this process, and how to ask them for a restart."""
+
+    def systemctl(self, answer: str, code: int = 0):
+        patched = patch("digimem.autostart._systemctl", return_value=(code, answer))
+        self.addCleanup(patch.stopall)
+        return patched.start()
+
+    def test_the_unit_running_this_very_process_is_the_one_in_charge(self) -> None:
+        self.systemctl(str(os.getpid()))
+        with patch("sys.platform", "linux"), patch("digimem.autostart._has_systemd", return_value=True):
+            self.assertEqual(autostart.supervisor(), ("systemd", "digimem.service"))
+
+    def test_a_unit_running_some_other_process_is_not(self) -> None:
+        """A service started by hand while the unit is up is nobody's job."""
+        self.systemctl(str(os.getpid() + 1))
+        with patch("sys.platform", "linux"), patch("digimem.autostart._has_systemd", return_value=True):
+            self.assertIsNone(autostart.supervisor())
+
+    def test_a_machine_without_systemd_has_no_supervisor(self) -> None:
+        with patch("sys.platform", "linux"), patch("digimem.autostart._has_systemd", return_value=False):
+            self.assertIsNone(autostart.supervisor())
+
+    def test_launchd_names_the_job_in_the_environment(self) -> None:
+        with patch("sys.platform", "darwin"), \
+             patch.dict(os.environ, {"XPC_SERVICE_NAME": autostart.LAUNCH_AGENT_ID}):
+            self.assertEqual(
+                autostart.supervisor(), ("launchd", autostart.LAUNCH_AGENT_ID)
+            )
+        with patch("sys.platform", "darwin"), \
+             patch.dict(os.environ, {"XPC_SERVICE_NAME": "0"}):
+            self.assertIsNone(autostart.supervisor())
+
+    def test_systemd_is_asked_without_waiting_to_be_killed(self) -> None:
+        asked = self.systemctl("")
+        autostart.restart_supervised(("systemd", "digimem.service"))
+        self.assertEqual(
+            asked.call_args.args, ("restart", "--no-block", "digimem.service")
+        )
+
+    def test_a_systemd_refusal_is_reported(self) -> None:
+        self.systemctl("Unit not found", code=1)
+        with self.assertRaises(RuntimeError):
+            autostart.restart_supervised(("systemd", "digimem.service"))
+
+    def test_launchd_is_asked_to_kick_the_job_over(self) -> None:
+        with patch("digimem.autostart.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stderr = ""
+            autostart.restart_supervised(("launchd", autostart.LAUNCH_AGENT_ID))
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], ["launchctl", "kickstart", "-k"])
+        self.assertTrue(command[3].endswith(f"/{autostart.LAUNCH_AGENT_ID}"))
+
+
 class RunningServiceTest(unittest.TestCase):
     """Start a real service on a real socket and talk to it."""
 
@@ -140,6 +197,19 @@ class RunningServiceTest(unittest.TestCase):
         with urllib.request.urlopen(request, timeout=5) as response:
             return json.loads(response.read())
 
+    def post(self, path: str, payload: dict | None = None) -> dict:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.info()['port']}{path}",
+            data=json.dumps(payload or {}).encode(),
+            headers={
+                "X-DigiMem-Token": self.info()["token"],
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return json.loads(response.read())
+
     def test_it_publishes_itself_and_answers(self) -> None:
         self.assertTrue(service_is_live(self.info()))
         self.assertEqual(self.get("/api/health"), {"status": "ok"})
@@ -169,6 +239,54 @@ class RunningServiceTest(unittest.TestCase):
         self.assertEqual(details["port"], self.info()["port"])
         self.assertIn("autostart", details)
         self.assertIn("shortcut", details)
+        self.assertTrue(details["restartable"])
+
+    def test_restarting_stops_this_service_and_starts_the_next(self) -> None:
+        """The replacement waits for the lock and the port to be free."""
+        with patch("digimem.service._start_replacement") as replacement:
+            replacement.side_effect = lambda _: self.assertIsNone(
+                read_service_info(self.root), "the lock was still held"
+            )
+            self.assertTrue(self.post("/api/service/restart")["restarting"])
+            self.thread.join(timeout=20)
+        self.server = None
+        replacement.assert_called_once()
+        self.assertIsNone(read_service_info(self.root))
+        self.assertEqual(self.result, 0)
+
+    def test_a_supervised_service_is_restarted_by_its_supervisor(self) -> None:
+        """Replacing itself behind systemd's back would lose it the job."""
+        found = ("systemd", "digimem.service")
+        with patch("digimem.autostart.supervisor", return_value=found), \
+             patch("digimem.autostart.restart_supervised") as asked:
+            self.assertEqual(self.post("/api/service/restart")["by"], "systemd")
+            deadline = time.monotonic() + 10
+            while not asked.called and time.monotonic() < deadline:
+                time.sleep(0.05)
+        asked.assert_called_once_with(found)
+        # Nothing was stopped here: the supervisor stops it, its own way.
+        self.assertFalse(self.server.app.restart_wanted)  # type: ignore[attr-defined]
+        self.assertEqual(self.get("/api/health"), {"status": "ok"})
+
+    def test_a_supervisor_alone_is_enough_to_offer_a_restart(self) -> None:
+        self.server.app.stop_for_restart = None  # type: ignore[attr-defined]
+        with patch("digimem.autostart.supervisor", return_value=("systemd", "x.service")):
+            self.assertTrue(self.get("/api/service")["restartable"])
+
+    def test_restarting_is_refused_while_a_sync_is_running(self) -> None:
+        with patch.object(
+            type(self.server.app), "active_run_id", return_value=7  # type: ignore[attr-defined]
+        ):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.post("/api/service/restart")
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+        self.assertFalse(self.server.app.restart_wanted)  # type: ignore[attr-defined]
+
+    def test_a_service_run_in_a_terminal_offers_no_restart(self) -> None:
+        """Replacing what someone is watching with a detached copy is not it."""
+        self.server.app.stop_for_restart = None  # type: ignore[attr-defined]
+        self.assertFalse(self.get("/api/service")["restartable"])
 
     def test_shutdown_clears_the_published_file(self) -> None:
         self.server.shutdown()  # type: ignore[attr-defined]

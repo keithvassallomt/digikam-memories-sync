@@ -162,6 +162,58 @@ def _systemctl(*arguments: str) -> tuple[int, str]:
     return finished.returncode, (finished.stderr or finished.stdout or "").strip()
 
 
+def supervisor() -> tuple[str, str] | None:
+    """The login supervisor that is running this very process, if one is.
+
+    A supervised service that stops itself and starts its own replacement
+    leaves the supervisor believing the job is down: it would not bring it back
+    after a later crash, and its status would contradict what is really
+    running. Knowing who is in charge is what lets a restart ask them instead.
+    """
+    if sys.platform == "darwin":
+        # launchd names the job it started in the process's own environment.
+        label = os.environ.get("XPC_SERVICE_NAME", "")
+        return ("launchd", LAUNCH_AGENT_ID) if label == LAUNCH_AGENT_ID else None
+    if sys.platform == "win32" or not _has_systemd():
+        # The registry and an XDG entry start a process and then forget it.
+        return None
+    unit = f"{SERVICE_NAME}.service"
+    code, answer = _systemctl("show", "-p", "MainPID", "--value", unit)
+    if code != 0:
+        return None
+    try:
+        main_pid = int(answer.strip() or 0)
+    except ValueError:
+        return None
+    return ("systemd", unit) if main_pid == os.getpid() else None
+
+
+def restart_supervised(found: tuple[str, str]) -> None:
+    """Ask the supervisor to restart the job this process is.
+
+    Neither call waits. The request is with the supervisor the moment it is
+    made, and this process is about to be stopped to carry it out, so waiting
+    would only mean waiting to be killed.
+    """
+    kind, name = found
+    if kind == "systemd":
+        code, answer = _systemctl("restart", "--no-block", name)
+        if code != 0:
+            raise RuntimeError(f"systemd refused the restart: {answer}")
+        return
+    try:
+        finished = subprocess.run(
+            ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{name}"],
+            capture_output=True, text=True, check=False, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f"launchd could not be reached: {error}") from error
+    if finished.returncode != 0:
+        raise RuntimeError(
+            f"launchd refused the restart: {(finished.stderr or '').strip()}"
+        )
+
+
 def enable(config_dir: str | Path | None = None, *, start: bool = True) -> dict[str, Any]:
     """Install the login entry. Returns what was written and whether it started."""
     kind = mechanism()

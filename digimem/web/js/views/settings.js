@@ -160,9 +160,49 @@ export function create({ go, refresh }) {
           : h('span', { class: `pill ${state === 'granted' ? 'is-good' : 'is-off'}` }, state)));
   }
 
+  // The service comes back with a new address and a new token, so the page it
+  // was serving is stale. Waiting for it to go before waiting for it to
+  // answer is what stops a reload landing on the copy that is about to stop.
+  const RESTART_TIMEOUT_MS = 30000;
+
+  function alive() {
+    return fetch('/', { cache: 'no-store' }).then(() => true, () => false);
+  }
+
+  async function settles(wanted) {
+    const deadline = Date.now() + RESTART_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (await alive() === wanted) return true;
+      await new Promise((done) => { setTimeout(done, 300); });
+    }
+    return false;
+  }
+
+  async function restart(control) {
+    control.disabled = true;
+    say('Restarting DigiMem…');
+    try {
+      await api.post('/api/service/restart', {});
+    } catch (error) {
+      control.disabled = false;
+      say(error.message, 'error');
+      return;
+    }
+    await settles(false);
+    if (await settles(true)) window.location.reload();
+    else {
+      control.disabled = false;
+      say('DigiMem did not come back. Open it from the application menu.', 'error');
+    }
+  }
+
   function serviceCard(service) {
     const login = service.autostart || {};
     const shortcut = service.shortcut || {};
+    const restartControl = button('Restart', {
+      class: 'button button-small',
+      onClick: (event) => restart(event.currentTarget),
+    });
     return card(
       h('h3', {}, 'Background service'),
       settingRow('Start DigiMem when I log in',
@@ -179,7 +219,13 @@ export function create({ go, refresh }) {
               onClick: async () => {
                 if (await send('/api/shortcuts/install', {}, 'Shortcut')) load();
               },
-            })));
+            })),
+      service.restartable
+        ? settingRow('Restart DigiMem',
+            `Picks up a new version${service.version ? `. Running ${service.version}` : ''}. `
+            + 'A sync in progress has to finish first.',
+            restartControl)
+        : null);
   }
 
   function storageCard(settings) {

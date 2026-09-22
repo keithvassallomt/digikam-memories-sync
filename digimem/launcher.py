@@ -37,6 +37,10 @@ def start_service_detached(config_dir: str | Path | None = None) -> subprocess.P
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
+        # A source checkout is found through the working directory, the same
+        # way a written menu entry finds it. None means "wherever we are",
+        # which is right for an installed or frozen DigiMem.
+        "cwd": relaunch.working_directory(),
     }
     if sys.platform == "win32":
         creation = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
@@ -120,4 +124,6 @@ def run_foreground(
         url = f"http://127.0.0.1:{server.server_port}/"  # type: ignore[attr-defined]
         threading.Timer(0.2, webbrowser.open, args=(url,)).start()
 
-    return run_service(config_dir, port, verbose=verbose, on_start=opened)
+    return run_service(
+        config_dir, port, verbose=verbose, restartable=False, on_start=opened
+    )

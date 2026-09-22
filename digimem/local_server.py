@@ -200,6 +200,8 @@ class DigiMemHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.ACCEPTED, self.server.app.rebuild_ledger())
             elif path == "/api/service/autostart":
                 self._json(HTTPStatus.OK, self.server.app.set_autostart(payload))
+            elif path == "/api/service/restart":
+                self._json(HTTPStatus.ACCEPTED, self.server.app.restart_service())
             elif path == "/api/shortcuts/install":
                 self._json(HTTPStatus.OK, self.server.app.install_shortcut())
             elif path.startswith("/api/runs/"):
