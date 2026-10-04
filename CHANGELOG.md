@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Names now reach Memories on photos shared with another Nextcloud user.
+  Recognize detects every face once for each person who can see the photo, on
+  the same box, and DigiMem was reading the other person's detections along
+  with yours. When it picked theirs, Nextcloud refused to name a face that was
+  not yours to name, and the apply failed with "Face detection was not found
+  for this image". DigiMem now reads only the detections that belong to the
+  account it signs in as, which is all the companion app would ever let it
+  change anyway.
+
 ## [0.3.0] - 2026-09-22
 
 ### Added

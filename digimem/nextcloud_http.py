@@ -1397,6 +1397,12 @@ class NextcloudHTTP:
             h = item.get("height")
             if None in (det_id, x, y, w, h):
                 continue
+            # A photo shared with someone else carries their detections too,
+            # one per face, on the same rectangles. Those are theirs to name,
+            # and the companion app refuses to touch them.
+            owner = item.get("userId", item.get("user_id"))
+            if owner is not None and str(owner) != self.user_id:
+                continue
             cluster_id = item.get("clusterId", item.get("cluster_id"))
             title = (item.get("title") or "").strip()
             person = _recognize_person_title(title, cluster_id)

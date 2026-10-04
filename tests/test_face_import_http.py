@@ -15,6 +15,7 @@ class FaceImportHTTPTests(unittest.TestCase):
     def make_backend(self):
         backend = NextcloudHTTP.__new__(NextcloudHTTP)
         backend.timeout = 60.0
+        backend.user_id = "keith"
         backend.supports_insert = True
         backend.supports_export = True
         backend.supports_assign = False
@@ -426,6 +427,49 @@ class FaceImportHTTPTests(unittest.TestCase):
         self.assertEqual(faces[0].nc_cluster_id, 241)
         self.assertEqual(faces[1].person, "Gail Vassallo")
         self.assertEqual(faces[1].dav_parent, "Gail Vassallo")
+
+    def test_detections_belonging_to_another_user_are_ignored(self):
+        backend = self.make_backend()
+        nc_file = NextcloudFile(
+            file_id=884260,
+            path="files/Photos/shared.jpg",
+            name="shared.jpg",
+            size=0,
+        )
+        payload = json.dumps(
+            [
+                {
+                    "id": 37085,
+                    "userId": "keith",
+                    "clusterId": None,
+                    "title": None,
+                    "x": 0.56,
+                    "y": 0.30,
+                    "width": 0.10,
+                    "height": 0.18,
+                },
+                {
+                    "id": 37086,
+                    "userId": "gail",
+                    "clusterId": 1034,
+                    "title": "1034",
+                    "x": 0.56,
+                    "y": 0.30,
+                    "width": 0.10,
+                    "height": 0.18,
+                },
+            ]
+        )
+        raw = f'''<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns">
+  <d:response><d:propstat><d:prop>
+    <nc:face-detections>{payload}</nc:face-detections>
+  </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+</d:multistatus>'''.encode()
+
+        faces = backend._parse_face_detections(raw, nc_file)
+
+        self.assertEqual([face.nc_detection_id for face in faces], [37085])
 
 
 if __name__ == "__main__":
