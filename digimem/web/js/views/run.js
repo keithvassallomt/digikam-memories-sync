@@ -274,7 +274,7 @@ export function create({ go, refresh }) {
       replace(body,
         button('← Activity', { class: 'button button-quiet button-small back', onClick: () => go('/activity') }),
         h('h1', {}, `Sync · ${when(run.started_at)}`),
-        h('p', { class: 'lead' }, `Started by ${copy.trigger(run.trigger)}. ${copy.outcome(run)}.`),
+        h('p', { class: 'lead' }, `Started ${copy.reason(run.trigger)}.${copy.outcome(run)}.`),
         (run.progress || {}).error
           ? h('p', { class: 'message error' }, run.progress.error)
           : null,

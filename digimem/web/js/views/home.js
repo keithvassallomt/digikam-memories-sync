@@ -174,6 +174,13 @@ export function create({ go, refresh }) {
           h('div', { class: 'muted' }, 'Memories rejected them.')),
         button('Review', { class: 'button button-small', onClick: () => go('/attention/failures') })));
     }
+    if (totals.issues) {
+      rows.push(h('div', { class: 'attention-row' },
+        h('div', {},
+          h('h3', {}, `${plural(totals.issues, 'photo has', 'photos have')} face boxes that look wrong`),
+          h('div', { class: 'muted' }, 'They cannot sync cleanly until they are sorted out.')),
+        button('Review', { class: 'button button-small', onClick: () => go('/attention/library') })));
+    }
     if (notify.supported() && notify.permission() === 'default') {
       rows.push(h('div', { class: 'attention-row' },
         h('div', { class: 'muted' },
@@ -183,7 +190,8 @@ export function create({ go, refresh }) {
           onClick: async () => { await notify.request(); await refresh(); },
         })));
     }
-    attention.append(h('section', { class: 'attention' }, ...rows));
+    // A count with no row to explain it would draw an empty box.
+    if (rows.length) attention.append(h('section', { class: 'attention' }, ...rows));
   }
 
   function pill(text, kind) {

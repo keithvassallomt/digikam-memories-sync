@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   account it signs in as, which is all the companion app would ever let it
   change anyway.
 
+- The home screen no longer shows an empty yellow box. Face boxes that look
+  wrong count towards what needs attention, but the home screen had no line
+  for them, so a library whose only open items were those drew the box with
+  nothing in it. It now says how many photos have them, with a button to
+  review them.
+
+- A sync in progress says "Started 9 minutes ago because digiKam changed"
+  rather than "because digiKam changed changed something", and a run's page
+  says "Started because digiKam changed" rather than "Started by digiKam
+  changed".
+
 ## [0.3.0] - 2026-09-22
 
 ### Added

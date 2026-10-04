@@ -18,6 +18,21 @@ export function trigger(name) {
   return TRIGGERS[name] || name || 'you';
 }
 
+// The same triggers, as the end of "Started 9 minutes ago …".
+const REASONS = {
+  manual: 'because you asked',
+  decisions: 'to apply your decisions',
+  digikam_closed: 'because digiKam closed',
+  digikam_changed: 'because digiKam changed',
+  memories_changed: 'because Memories changed',
+  interval: 'as the daily check',
+  resume: 'after being resumed',
+};
+
+export function reason(name) {
+  return REASONS[name || 'manual'] || `because of ${trigger(name)}`;
+}
+
 export const PHASES = {
   starting: 'Getting ready',
   waiting: 'Waiting to continue',
@@ -141,7 +156,7 @@ export function subline(status) {
       return 'DigiMem needs your digiKam folder and your Nextcloud account.';
     case 'syncing': {
       const run = status.run || {};
-      return `Started ${ago(run.started_at)} because ${trigger(run.trigger)} changed something.`;
+      return `Started ${ago(run.started_at)} ${reason(run.trigger)}.`;
     }
     case 'attention':
       return 'Everything else keeps syncing around them.';
