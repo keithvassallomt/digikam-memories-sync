@@ -58,6 +58,8 @@ to tell whether it has restarted recently.
 Home answers one question — *what is DigiMem doing?* — in the first line, and
 gives you the buttons that make sense for that answer.
 
+![Home during a sync: the headline, the progress card, a face-box note waiting for review, the two libraries, and recent activity](images/home-syncing.png)
+
 ### The headline
 
 The big line changes with the situation: *Everything is in sync*, *Syncing…*,
@@ -137,6 +139,8 @@ Click any row to open it.
 
 The sync screen is the whole story of one sync: what it found, what it wants to
 change, and the button that applies it.
+
+![One sync while its changes are applied: the timeline, the four numbers, what the sync found, and the apply progress](images/sync-details.png)
 
 ### The timeline
 
@@ -275,6 +279,8 @@ sync cleanly, however many times it tries. It looks for two things:
 Left alone, a wrongly drawn box gets proposed on every sync and refused on
 every sync, for ever, because the other library has somebody else in that spot.
 
+![Which of these is wrong? One person tagged twice on the same face, with a Remove button for each box](images/review-face-boxes.png)
+
 The **Which of these is wrong?** screen shows the photo with the boxes drawn on
 it and numbered:
 
@@ -299,6 +305,8 @@ Everything the background service has done, newest first. Most of the time you
 will not need it; when something is behaving strangely, it is the fastest way
 to see why.
 
+![The Logs screen, with the level, run and search filters above the newest lines](images/logs.png)
+
 - **Level** — *Info* is the normal amount of detail. *Everything* includes the
   fine-grained lines, *Warnings* and *Errors* narrow it down to trouble.
 - **Run** — type a sync's number to see only that sync's lines.
@@ -314,6 +322,8 @@ would rather read them there.
 ## Settings
 
 Set once, checked before every sync.
+
+![Settings, from Libraries down to Automatic sync](images/settings-1.png)
 
 ### Libraries
 
@@ -357,6 +367,8 @@ other.
 - **Sync at least every** — a safety net: sync this often even if nothing
   appears to have changed.
 
+![Settings, from Notifications down to Advanced](images/settings-2.png)
+
 ### Notifications
 
 Which things DigiMem tells you about — faces needing a decision, connection
@@ -371,6 +383,9 @@ refuse it, DigiMem falls back to your desktop's own notifications.
 - **Start DigiMem when I log in** — without it, syncing only happens while
   DigiMem is running.
 - **Add to application menu** — creates the shortcut that opens this window.
+- **Restart DigiMem**: restarts the background service, which is how it picks
+  up a new version. A sync in progress has to finish first, and a service you
+  started yourself in a terminal does not offer it.
 
 ### Storage
 

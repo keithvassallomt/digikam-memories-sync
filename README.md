@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="ClusterCut Logo" width="128" />
+  <img src="assets/logo.png" alt="DigiMem Logo" width="128" />
 </p>
 
 # DigiMem
@@ -27,6 +27,10 @@ it waits.
 - **Interruptible**: a sync that is cut short resumes where it stopped rather
   than starting again.
 - **Yours**: everything stays between your computer and your own Nextcloud.
+
+<p align="center">
+  <img src="docs/images/home-syncing.png" alt="DigiMem's Home screen during a sync: a progress card, a note that some photos have face boxes that look wrong, both libraries' status, and recent activity" width="720" />
+</p>
 
 ## What you need
 
