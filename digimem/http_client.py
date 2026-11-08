@@ -34,6 +34,18 @@ class KeepAliveHttpClient:
         self.scheme = parsed.scheme
         self.host = parsed.hostname or "localhost"
         self.port = parsed.port or (443 if self.scheme == "https" else 80)
+        # Nextcloud validates the complete Host header against trusted_domains.
+        # Keep an explicitly supplied port (for example :8443) here; using
+        # only parsed.hostname makes otherwise valid non-standard-port URLs
+        # fail with HTTP 400 before the request reaches DAV.
+        host_for_header = self.host
+        if ":" in host_for_header and not host_for_header.startswith("["):
+            host_for_header = f"[{host_for_header}]"
+        self.host_header = (
+            f"{host_for_header}:{parsed.port}"
+            if parsed.port is not None
+            else host_for_header
+        )
         # base path prefix on the host (usually empty for https://cloud.example.com)
         self.base_path = (parsed.path or "").rstrip("/")
         self.timeout = timeout
@@ -103,7 +115,7 @@ class KeepAliveHttpClient:
             req_path = path
 
         hdrs = {
-            "Host": self.host,
+            "Host": self.host_header,
             "Connection": "keep-alive",
             "Accept-Encoding": "identity",
         }
