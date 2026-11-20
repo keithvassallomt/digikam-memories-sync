@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-20
+
 ### Added
 
 - **Wait for Nextcloud** in Settings, under Advanced: how long one request to
@@ -41,11 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the server answers quickly again.
   ([#3](https://github.com/keithvassallomt/digikam-memories-sync/issues/3))
 
-- The Nextcloud companion app answers a request for faces within about ten
-  seconds, sending what it has found by then and where to carry on, instead of
-  finishing a whole batch first. Finding each face's photo is slow on some
-  servers, and this keeps every answer well inside the time DigiMem waits,
-  whichever version of DigiMem is asking.
+- The Nextcloud companion app (0.6.2) answers a request for faces within about
+  ten seconds, sending what it has found by then and where to carry on,
+  instead of finishing a whole batch first. Finding each face's photo is slow
+  on some servers, and this keeps every answer well inside the time DigiMem
+  waits, whichever version of DigiMem is asking.
   ([#3](https://github.com/keithvassallomt/digikam-memories-sync/issues/3))
 
 - DigiMem connects to a Nextcloud on a port other than the usual one, such as
@@ -276,7 +278,8 @@ First release.
 - Nextcloud 33 to 35 with Recognize installed and enabled, and the digiKam Face
   companion app.
 
-[Unreleased]: https://github.com/keithvassallomt/digikam-memories-sync/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/keithvassallomt/digikam-memories-sync/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/keithvassallomt/digikam-memories-sync/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/keithvassallomt/digikam-memories-sync/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/keithvassallomt/digikam-memories-sync/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/keithvassallomt/digikam-memories-sync/compare/v0.1.0...v0.2.0
