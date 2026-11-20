@@ -600,6 +600,9 @@ class AppService:
             "backups_keep": int, "log_days": int,
         })
 
+    def update_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._update_group("connection", payload, {"timeout_seconds": int})
+
     def _update_group(
         self, group: str, payload: dict[str, Any], schema: dict[str, Any]
     ) -> dict[str, Any]:
@@ -645,7 +648,7 @@ class AppService:
         if not url:
             raise ValueError("Enter your Nextcloud address.")
 
-        backend = self.backend_factory(url, user_id, password, http_workers=1)
+        backend = self._backend(url, user_id, password, http_workers=1)
         try:
             requirements = backend.connection_requirements()
             return {
@@ -685,7 +688,7 @@ class AppService:
         password = self.settings.password(user_id)
         if not password:
             raise ValueError("The saved Nextcloud app password is unavailable.")
-        backend = self.backend_factory(
+        backend = self._backend(
             str(settings["nextcloud_url"]), user_id, password, http_workers=4
         )
         try:
@@ -733,6 +736,19 @@ class AppService:
             thread.start()
         return {"run_id": run_id, "status": "previewing"}
 
+    def _backend(self, url: str, user_id: str, password: str, *, http_workers: int) -> Any:
+        """A Nextcloud connection that waits as long as the settings allow."""
+        connection = dict(
+            DEFAULTS["connection"], **(self.settings.load().get("connection") or {})
+        )
+        return self.backend_factory(
+            url,
+            user_id,
+            password,
+            http_workers=http_workers,
+            timeout=float(connection["timeout_seconds"]),
+        )
+
     def _short_backend(self) -> Any:
         """A connection for one quick question, or None when not set up."""
         settings = self.settings.load()
@@ -740,7 +756,7 @@ class AppService:
         password = self.settings.password(user_id)
         if not settings.get("nextcloud_url") or not user_id or not password:
             return None
-        return self.backend_factory(
+        return self._backend(
             str(settings["nextcloud_url"]), user_id, password, http_workers=1
         )
 
@@ -1092,7 +1108,7 @@ class AppService:
                 password = self.settings.password(user_id)
                 if not password:
                     raise ValueError("The saved Nextcloud app password is unavailable.")
-                backend = self.backend_factory(
+                backend = self._backend(
                     str(settings["nextcloud_url"]), user_id, password, http_workers=4
                 )
                 requirements = backend.connection_requirements()
@@ -1470,7 +1486,7 @@ class AppService:
         face_ledger = StateLedger(self.state).load()
         sink = StateCheckpoint(self.state, run_id)
         try:
-            backend = self.backend_factory(
+            backend = self._backend(
                 str(settings["nextcloud_url"]), user_id, password, http_workers=16
             )
             with self.digikam_factory(str(settings["digikam_db"])) as digikam:

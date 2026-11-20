@@ -194,6 +194,8 @@ class DigiMemHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.server.app.update_notifications(payload))
             elif path == "/api/settings/retention":
                 self._json(HTTPStatus.OK, self.server.app.update_retention(payload))
+            elif path == "/api/settings/connection":
+                self._json(HTTPStatus.OK, self.server.app.update_connection(payload))
             elif path == "/api/decisions/apply":
                 self._json(HTTPStatus.OK, self.server.app.create_decisions_run())
             elif path == "/api/ledger/rebuild":

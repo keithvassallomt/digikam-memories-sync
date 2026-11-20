@@ -7,6 +7,7 @@ import logging
 import re
 import ssl
 import threading
+import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,7 +17,7 @@ from urllib.parse import quote, unquote
 
 from . import fingerprint as fingerprint_module
 from .constants import COMPANION_APP_NAME, DAV_NS, IMAGE_EXT
-from .http_client import KeepAliveHttpClient
+from .http_client import HttpTimeout, KeepAliveHttpClient
 from .matching import digikam_path_candidates
 from .models import (
     DigikamImage,
@@ -31,6 +32,10 @@ from .names import sanitize_person_name
 from .paths import normalize_path, strip_nc_files_prefix
 
 LOG = logging.getLogger(__name__)
+
+#: Page sizes for reading Memories faces, largest first. A page that times out
+#: is asked for again at the next size down.
+FACE_PAGE_SIZES = (1000, 250, 50, 10)
 
 # Both apps have to be installed on the server, and a card in first-run setup
 # is the only place most people will be told so. It has to lead somewhere that
@@ -487,19 +492,47 @@ class NextcloudHTTP:
         cleaned = sanitize_person_name(person or "").strip()
         after = 0
         out: list[NextcloudNamedFace] = []
+        # A page that takes too long is asked for again from the same place,
+        # smaller, rather than repeated as it was: the server would only be as
+        # slow again, and a later run would start from the beginning and stop
+        # at the same page. Quick pages let the size grow back.
+        first = max(1, min(1000, int(page_size)))
+        sizes = [first] + [size for size in FACE_PAGE_SIZES if size < first]
+        step = 0
         while True:
             query: dict[str, str | int] = {
                 "after": after,
-                "limit": max(1, min(1000, int(page_size))),
+                "limit": sizes[step],
             }
             if cleaned:
                 query["person"] = cleaned
             path = f"{self.face_list_url()}?{urllib.parse.urlencode(query)}"
-            status, _, raw = self._request(
-                "GET",
-                path,
-                headers={"Accept": "application/json", "OCS-APIRequest": "true"},
-            )
+            started = time.monotonic()
+            try:
+                status, _, raw = self._request(
+                    "GET",
+                    path,
+                    headers={"Accept": "application/json", "OCS-APIRequest": "true"},
+                    retry_timeouts=False,
+                )
+            except HttpTimeout:
+                if step + 1 >= len(sizes):
+                    raise
+                step += 1
+                LOG.warning(
+                    "Memories faces after %d took over %g seconds; "
+                    "asking for %d at a time instead",
+                    after,
+                    self.timeout,
+                    sizes[step],
+                )
+                continue
+            if step > 0:
+                # Grow back only when the larger page, at this page's pace,
+                # would take under half the wait.
+                elapsed = time.monotonic() - started
+                if elapsed * sizes[step - 1] / sizes[step] < self.timeout / 2:
+                    step -= 1
             if status != 200:
                 raise NextcloudConnectionError(
                     f"Could not list Memories faces (HTTP {status})."
@@ -718,6 +751,7 @@ class NextcloudHTTP:
         body: Optional[bytes] = None,
         recognize: bool = False,
         timeout: Optional[float] = None,
+        retry_timeouts: bool = True,
     ) -> tuple[int, dict[str, str], bytes]:
         # KeepAliveHttpClient wants a path starting with /
         req_path = path if path.startswith("/") or path.startswith("http") else f"/{path}"
@@ -728,7 +762,12 @@ class NextcloudHTTP:
             hdrs.update(headers)
         LOG.debug("HTTP %s %s", method, req_path)
         status, resp_headers, raw = self._client.request(
-            method, req_path, headers=hdrs or None, body=body, timeout=timeout
+            method,
+            req_path,
+            headers=hdrs or None,
+            body=body,
+            timeout=timeout,
+            retry_timeouts=retry_timeouts,
         )
         LOG.debug("HTTP %s %s → %s (%s bytes)", method, req_path, status, len(raw))
         return status, resp_headers, raw

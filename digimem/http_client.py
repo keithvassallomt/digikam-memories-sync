@@ -11,6 +11,14 @@ from urllib.parse import urlparse
 LOG = logging.getLogger(__name__)
 
 
+class HttpTimeout(RuntimeError):
+    """The server took longer to answer than the request allowed.
+
+    A subclass of the error every failed request raises, so callers that do
+    not care which way it failed need not change.
+    """
+
+
 class KeepAliveHttpClient:
     """
     Minimal HTTP(S) client that reuses one connection per thread.
@@ -94,10 +102,15 @@ class KeepAliveHttpClient:
         headers: Optional[dict[str, str]] = None,
         body: Optional[bytes] = None,
         timeout: Optional[float] = None,
+        retry_timeouts: bool = True,
     ) -> tuple[int, dict[str, str], bytes]:
         """
         Perform a request. ``path`` is absolute on the server
         (e.g. /remote.php/dav/files/user/a.jpg) or relative to base_path.
+
+        With ``retry_timeouts`` off, a timeout raises :class:`HttpTimeout` at
+        once instead of sending the same slow request again. That is for a
+        caller that can ask a smaller question instead.
         """
         if path.startswith("http://") or path.startswith("https://"):
             parsed = urlparse(path)
@@ -152,6 +165,15 @@ class KeepAliveHttpClient:
                     e,
                 )
                 self._drop_conn()
+                if isinstance(e, TimeoutError) and not retry_timeouts:
+                    raise HttpTimeout(
+                        f"HTTP {method} {req_path} timed out after "
+                        f"{request_timeout:g} seconds"
+                    ) from e
+        if isinstance(last_err, TimeoutError):
+            raise HttpTimeout(
+                f"HTTP {method} {req_path} failed after retries: {last_err}"
+            ) from last_err
         raise RuntimeError(
             f"HTTP {method} {req_path} failed after retries: {last_err}"
         )

@@ -288,6 +288,40 @@ class AppFoundationTests(unittest.TestCase):
         finally:
             state.close()
 
+    def test_the_nextcloud_wait_reaches_every_connection(self):
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        settings.save(
+            {
+                "digikam_library": str(self.library),
+                "digikam_db": str(self.library / "digikam4.db"),
+                "nextcloud_url": "https://cloud.test",
+                "nc_user": "keith",
+                "nc_photos_path": "Photos",
+            },
+            "secret",
+        )
+        state = StateStore(self.root / "state.sqlite3")
+        opened = []
+
+        def factory(*args, **kwargs):
+            opened.append(kwargs)
+            return FakeBackend(NextcloudRequirements(True, True, "https://install.test"))
+
+        service = AppService(
+            settings, state, backend_factory=factory, digikam_factory=FakeDigikam
+        )
+        try:
+            service.people()
+            self.assertEqual(opened[-1]["timeout"], 60.0, "the default")
+            saved = service.update_connection({"timeout_seconds": 300})
+            self.assertEqual(saved["connection"], {"timeout_seconds": 300})
+            service.people()
+            self.assertEqual(opened[-1]["timeout"], 300.0)
+            with self.assertRaisesRegex(ValueError, "whole number"):
+                service.update_connection({"timeout_seconds": "soon"})
+        finally:
+            state.close()
+
     def test_connection_result_guides_missing_companion_app(self):
         settings = SettingsStore(self.root / "config", use_keyring=False)
         state = StateStore(self.root / "state.sqlite3")

@@ -10,6 +10,15 @@ use OCP\Files\IRootFolder;
 final class FaceExportService {
 	public const PAGE_SIZE_MAX = 1000;
 
+	/**
+	 * How long one page may spend finding photos before it is sent as it
+	 * stands. Each detection's photo is looked up in the user's folder, and on
+	 * some servers that is slow enough for a full page to outlast the client's
+	 * wait. The client then asked for the same page again, and again, and never
+	 * got past it. A short page costs one more request instead.
+	 */
+	public const PAGE_TIME_BUDGET_SECONDS = 10.0;
+
 	public function __construct(
 		private IRootFolder $rootFolder,
 		private RecognizeRepository $repository,
@@ -44,7 +53,15 @@ final class FaceExportService {
 		$detections = [];
 		$lastId = $after;
 		$fileCache = [];
-		foreach ($rows as $row) {
+		$started = hrtime(true);
+		$stoppedEarly = false;
+		foreach ($rows as $index => $row) {
+			// At least one row is always taken, so the cursor always moves.
+			if ($index > 0
+				&& (hrtime(true) - $started) / 1e9 > self::PAGE_TIME_BUDGET_SECONDS) {
+				$stoppedEarly = true;
+				break;
+			}
 			$lastId = (int)$row['id'];
 			$fileId = (int)$row['file_id'];
 			if (!array_key_exists($fileId, $fileCache)) {
@@ -80,7 +97,7 @@ final class FaceExportService {
 
 		return [
 			'detections' => $detections,
-			'nextAfter' => $hasMore ? $lastId : null,
+			'nextAfter' => ($hasMore || $stoppedEarly) ? $lastId : null,
 		];
 	}
 }

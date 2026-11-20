@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Wait for Nextcloud** in Settings, under Advanced: how long one request to
+  Nextcloud may take before DigiMem gives up on it. DigiMem now copes with a
+  slow server by itself, so this is for a server slower still. It stays at 60
+  seconds unless changed.
+
 ### Fixed
 
 - Photos are found in Nextcloud on Windows, and wherever the digiKam database
@@ -22,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A photo to review is shown from Nextcloud when it is not beside the digiKam
   database, instead of an error saying it is not available locally.
+
+- A slow Nextcloud no longer stops every sync at the same place. The faces
+  Memories knows about are read 1,000 at a time, and on some servers one
+  batch took longer than DigiMem's 60 second wait. DigiMem asked for the same
+  batch twice more and gave up, and the next attempt read from the beginning
+  and stopped at the same batch, for ever. A batch that takes too long is now
+  asked for again from the same place in smaller pieces, which grow back once
+  the server answers quickly again.
+  ([#3](https://github.com/keithvassallomt/digikam-memories-sync/issues/3))
+
+- The Nextcloud companion app answers a request for faces within about ten
+  seconds, sending what it has found by then and where to carry on, instead of
+  finishing a whole batch first. Finding each face's photo is slow on some
+  servers, and this keeps every answer well inside the time DigiMem waits,
+  whichever version of DigiMem is asking.
 
 ## [0.3.1] - 2026-10-04
 

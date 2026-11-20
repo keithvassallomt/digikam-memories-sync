@@ -240,9 +240,15 @@ export function create({ go, refresh }) {
           send('/api/settings/retention', { log_days }, 'Log retention'))));
   }
 
-  function advancedCard(ledger) {
+  function advancedCard(settings, ledger) {
+    const connection = settings.connection || {};
     return card(
       h('h3', {}, 'Advanced'),
+      settingRow('Wait for Nextcloud',
+        'How long one request may take. DigiMem copes with a slow server by itself, '
+        + 'so change this only if syncs still stop on timeouts. The default is 60.',
+        numberField(connection.timeout_seconds ?? 60, 'seconds', (timeout_seconds) =>
+          send('/api/settings/connection', { timeout_seconds }, 'Nextcloud wait'))),
       settingRow('Rebuild the face ledger',
         `DigiMem remembers ${ledger.remembered.toLocaleString()} agreed names. `
         + 'Rebuilding forgets them and learns again from a full run, which means '
@@ -271,7 +277,7 @@ export function create({ go, refresh }) {
         notificationsCard(settings),
         serviceCard(service),
         storageCard(settings),
-        advancedCard(ledger));
+        advancedCard(settings, ledger));
     } catch (error) {
       replace(body, h('p', { class: 'message error' }, error.message));
     }

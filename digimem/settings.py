@@ -53,6 +53,11 @@ DEFAULTS: dict[str, Any] = {
         "backups_keep": 10,
         "log_days": 30,
     },
+    "connection": {
+        # How long one Nextcloud request may take. DigiMem copes with a slow
+        # server by asking for less, so this is for servers slower still.
+        "timeout_seconds": 60,
+    },
 }
 
 LIBRARY_KEYS = (

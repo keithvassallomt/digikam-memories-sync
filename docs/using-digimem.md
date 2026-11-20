@@ -405,6 +405,11 @@ for everything that currently disagrees. It is worth doing if the remembered
 names have somehow got out of step with reality, and not otherwise. DigiMem
 asks for confirmation first.
 
+**Wait for Nextcloud** is how long DigiMem waits for one answer from Nextcloud:
+60 seconds unless you change it. DigiMem already copes with a slow server by
+asking for less at a time, so this is only worth raising if syncs still stop
+with "timed out" in the log.
+
 ## Things you might want to do
 
 **Sync one person I have just renamed.** Home → **Sync now → Sync one person…**.
