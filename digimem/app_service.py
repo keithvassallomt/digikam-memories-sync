@@ -9,6 +9,7 @@ import logging
 import mimetypes
 from datetime import datetime, timedelta, timezone
 from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -65,6 +66,13 @@ def is_systemic_apply_failure(error: Exception) -> bool:
         f"http {status}" in message
         for status in (401, 403, 408, 429, 500, 502, 503, 504)
     )
+
+
+@dataclass(frozen=True)
+class AtLeast:
+    """A settings value that is a whole number no smaller than ``minimum``."""
+
+    minimum: int
 
 
 def resolve_digikam_database(value: str | Path) -> Path:
@@ -601,7 +609,8 @@ class AppService:
         })
 
     def update_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._update_group("connection", payload, {"timeout_seconds": int})
+        # Below ten seconds, ordinary requests to a healthy server time out.
+        return self._update_group("connection", payload, {"timeout_seconds": AtLeast(10)})
 
     def _update_group(
         self, group: str, payload: dict[str, Any], schema: dict[str, Any]
@@ -609,6 +618,8 @@ class AppService:
         """Accept only known keys, coerced to the type the group expects.
 
         A key whose schema entry is a set of words takes one of those words.
+        ``int`` is a whole number from 1, and :class:`AtLeast` one from its
+        own minimum.
         """
         values: dict[str, Any] = {}
         for key, kind in schema.items():
@@ -629,8 +640,9 @@ class AppService:
                     number = int(raw)
                 except (TypeError, ValueError) as error:
                     raise ValueError(f"{key} must be a whole number.") from error
-                if number < 1:
-                    raise ValueError(f"{key} must be at least 1.")
+                minimum = kind.minimum if isinstance(kind, AtLeast) else 1
+                if number < minimum:
+                    raise ValueError(f"{key} must be at least {minimum}.")
                 values[key] = number
         if not values:
             raise ValueError("There was nothing to change.")

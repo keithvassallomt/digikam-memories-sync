@@ -45,9 +45,9 @@ export function create({ go, refresh }) {
     return h('label', { class: 'switch-label' }, input);
   }
 
-  function numberField(value, unit, onCommit) {
+  function numberField(value, unit, onCommit, { min = 1 } = {}) {
     const input = h('input', {
-      class: 'input input-number', type: 'number', min: '1', value: String(value),
+      class: 'input input-number', type: 'number', min: String(min), value: String(value),
       onChange: (event) => onCommit(Number(event.currentTarget.value)),
     });
     return h('div', { class: 'row-tight' }, input, unit ? h('span', { class: 'muted' }, unit) : null);
@@ -246,9 +246,11 @@ export function create({ go, refresh }) {
       h('h3', {}, 'Advanced'),
       settingRow('Wait for Nextcloud',
         'How long one request may take. DigiMem copes with a slow server by itself, '
-        + 'so change this only if syncs still stop on timeouts. The default is 60.',
+        + 'so change this only if syncs still stop on timeouts. The default is 60, '
+        + 'the least is 10.',
         numberField(connection.timeout_seconds ?? 60, 'seconds', (timeout_seconds) =>
-          send('/api/settings/connection', { timeout_seconds }, 'Nextcloud wait'))),
+          send('/api/settings/connection', { timeout_seconds }, 'Nextcloud wait'),
+          { min: 10 })),
       settingRow('Rebuild the face ledger',
         `DigiMem remembers ${ledger.remembered.toLocaleString()} agreed names. `
         + 'Rebuilding forgets them and learns again from a full run, which means '

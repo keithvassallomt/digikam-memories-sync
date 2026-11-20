@@ -319,6 +319,9 @@ class AppFoundationTests(unittest.TestCase):
             self.assertEqual(opened[-1]["timeout"], 300.0)
             with self.assertRaisesRegex(ValueError, "whole number"):
                 service.update_connection({"timeout_seconds": "soon"})
+            with self.assertRaisesRegex(ValueError, "at least 10"):
+                service.update_connection({"timeout_seconds": 9})
+            self.assertEqual(settings.load()["connection"]["timeout_seconds"], 300)
         finally:
             state.close()
 
