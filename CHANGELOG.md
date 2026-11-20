@@ -25,10 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   happened anywhere the database was kept away from the photos. A photo is now
   found by its path inside the digiKam collection, under the photos folder in
   Nextcloud, which is how the Memories-to-digiKam half already read them back.
-  ([#1](https://github.com/keithvassallomt/digikam-memories-sync/issues/1))
+  ([#1](https://github.com/keithvassallomt/digikam-memories-sync/issues/1),
+  [#4](https://github.com/keithvassallomt/digikam-memories-sync/issues/4))
 
 - A photo to review is shown from Nextcloud when it is not beside the digiKam
   database, instead of an error saying it is not available locally.
+  ([#1](https://github.com/keithvassallomt/digikam-memories-sync/issues/1))
 
 - A slow Nextcloud no longer stops every sync at the same place. The faces
   Memories knows about are read 1,000 at a time, and on some servers one
@@ -44,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finishing a whole batch first. Finding each face's photo is slow on some
   servers, and this keeps every answer well inside the time DigiMem waits,
   whichever version of DigiMem is asking.
+  ([#3](https://github.com/keithvassallomt/digikam-memories-sync/issues/3))
+
+- DigiMem connects to a Nextcloud on a port other than the usual one, such as
+  `https://cloud.example.com:8443`. Every request named the server without its
+  port, and Nextcloud, which checks that name against the addresses it trusts,
+  turned each one away with "400 Bad Request" when the trusted address included
+  the port.
+  ([#5](https://github.com/keithvassallomt/digikam-memories-sync/pull/5))
 
 ## [0.3.1] - 2026-10-04
 
