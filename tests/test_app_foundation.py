@@ -14,6 +14,7 @@ from digimem.local_server import DigiMemHTTPServer
 from digimem.models import NextcloudRequirements
 from digimem.models import RegionConflict, SyncReport
 from digimem.nextcloud_http import NextcloudConnectionError
+from digimem.paths import COLLECTION
 from digimem.settings import SettingsStore
 from digimem.state_store import StateStore
 
@@ -251,6 +252,38 @@ class AppFoundationTests(unittest.TestCase):
             self.assertEqual(content_type, "image/jpeg")
             fetch_preview.assert_called_once_with(
                 "https://cloud.test", "keith", "secret", 77
+            )
+        finally:
+            state.close()
+
+    def test_conflict_photo_away_from_the_database_comes_from_nextcloud(self):
+        """The database can sit apart from the photos, on a local disk while
+        the photos are on a network share, so there is nothing to read beside it."""
+        settings = SettingsStore(self.root / "config", use_keyring=False)
+        settings.save(
+            {
+                "digikam_library": str(self.library),
+                "digikam_db": str(self.library / "digikam4.db"),
+                "nextcloud_url": "https://cloud.test",
+                "nc_user": "keith",
+                "nc_photos_path": "Photos",
+            },
+            "secret",
+        )
+        state = StateStore(self.root / "state.sqlite3")
+        service = AppService(settings, state)
+        try:
+            run_id = state.create_run("person")
+            state.save_conflicts(run_id, [{"path": "2026/photo.jpg", "nc_file_id": 88}])
+            conflict_id = state.conflicts_for_run(run_id)["conflicts"][0]["id"]
+            with patch(
+                "digimem.app_service.fetch_file_preview",
+                return_value=(b"jpeg-preview", "image/jpeg"),
+            ) as fetch_preview:
+                body, _content_type = service.conflict_photo(run_id, conflict_id)
+            self.assertEqual(body, b"jpeg-preview")
+            fetch_preview.assert_called_once_with(
+                "https://cloud.test", "keith", "secret", 88
             )
         finally:
             state.close()
@@ -540,6 +573,7 @@ class AppFoundationTests(unittest.TestCase):
             self.assertEqual(result["summary"]["conflicts"], 1)
             self.assertEqual(result["direction"], "two_way")
             self.assertEqual(captured["only_person"], "Gail Vassallo")
+            self.assertEqual(captured["path_maps"], [(COLLECTION, "Photos")])
             self.assertFalse(captured["apply"])
             self.assertEqual(state.run(result["run_id"])["status"], "previewed")
             self.assertEqual(

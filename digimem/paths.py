@@ -4,6 +4,20 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
+#: A path-map source that stands for the digiKam collection itself. A photo is
+#: placed under the map's target by its path inside the collection (album
+#: folder and file name), the same way the Memories-to-digiKam pass reads it
+#: back. Where the collection sits on disk never enters into it, which matters
+#: because digiKam does not store that in a form that can be compared: on
+#: Windows the drive letter is missing, and a network share is stored as "/".
+COLLECTION = ""
+
+
+def is_collection_map(source: str) -> bool:
+    """True when a path-map source is :data:`COLLECTION`."""
+    return normalize_path(source) in ("", ".")
+
+
 def normalize_path(path: str) -> str:
     p = path.replace("\\", "/")
     p = PurePosixPath(p).as_posix()

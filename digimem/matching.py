@@ -6,7 +6,12 @@ from typing import Optional
 
 from .models import DigikamImage, FaceRegion, FileMatch, NextcloudFile
 from .names import person_names_match
-from .paths import apply_path_maps, normalize_path, strip_nc_files_prefix
+from .paths import (
+    apply_path_maps,
+    is_collection_map,
+    normalize_path,
+    strip_nc_files_prefix,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -24,13 +29,22 @@ def digikam_path_candidates(
     so we do not PROPFIND host filesystem paths that will always 404.
     If no map matches the digiKam path, returns an empty list (caller should
     skip the file).
+
+    A map whose source is :data:`~digimem.paths.COLLECTION` matches every
+    photo and places it by its path inside the collection. Folder maps are
+    tried first, so one can still override part of the collection.
     """
     raw: list[str] = []
     if path_maps:
-        for path in (di.full_path, di.relative_path):
-            mapped = apply_path_maps(path, path_maps)
-            if mapped is not None:
-                raw.append(mapped)
+        folder_maps = [(s, d) for s, d in path_maps if not is_collection_map(s)]
+        collection_targets = [d for s, d in path_maps if is_collection_map(s)]
+        if folder_maps:
+            for path in (di.full_path, di.relative_path):
+                mapped = apply_path_maps(path, folder_maps)
+                if mapped is not None:
+                    raw.append(mapped)
+        if collection_targets:
+            raw.append(normalize_path(f"{collection_targets[0]}/{di.relative_path}"))
         if not raw:
             # Outside configured path_maps → skip this file
             return []

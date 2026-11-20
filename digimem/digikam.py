@@ -19,6 +19,14 @@ LOG = logging.getLogger(__name__)
 _IN_CHUNK = 800
 
 
+def _collection_path(album_rel: Optional[str], name: str) -> str:
+    """A photo's path inside its collection: album folder, then file name."""
+    album = album_rel or "/"
+    if album == "/":
+        return normalize_path(name)
+    return normalize_path(f"{album.rstrip('/')}/{name}")
+
+
 class DigikamDB:
     """
     Read-only digiKam core DB access.
@@ -300,11 +308,7 @@ class DigikamDB:
         )
         images: dict[int, DigikamImage] = {}
         for row in cur.fetchall():
-            album_rel = row["album_rel"] or "/"
-            if album_rel == "/":
-                rel = row["name"]
-            else:
-                rel = f"{album_rel.rstrip('/')}/{row['name']}".lstrip("/")
+            rel = _collection_path(row["album_rel"], row["name"])
             root = (row["root_path"] or "").rstrip("/")
             full = f"{root}/{rel}" if root else rel
             images[int(row["image_id"])] = DigikamImage(
@@ -379,6 +383,28 @@ class DigikamDB:
             time.monotonic() - t0,
         )
         return result
+
+    def shared_relative_paths(self) -> frozenset[str]:
+        """Paths, lowercased, that more than one active photo has inside its collection.
+
+        Only possible with more than one collection. Placing every collection
+        in one Nextcloud folder by that path would give these photos the same
+        address there, so a sync leaves them out rather than guess which one
+        Nextcloud holds.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT a.relativePath AS album_rel, i.name AS name
+            FROM Images i
+            JOIN Albums a ON a.id = i.album
+            WHERE i.status = 1
+            GROUP BY lower(a.relativePath), lower(i.name)
+            HAVING COUNT(*) > 1
+            """
+        ).fetchall()
+        return frozenset(
+            _collection_path(row["album_rel"], row["name"]).lower() for row in rows
+        )
 
     def images_for_relative_paths(
         self,

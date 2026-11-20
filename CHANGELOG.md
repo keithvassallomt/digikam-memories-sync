@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Photos are found in Nextcloud on Windows, and wherever the digiKam database
+  is kept. DigiMem looked for photos inside the folder holding `digikam4.db`,
+  comparing it with where digiKam says each photo is. On Windows digiKam leaves
+  the drive letter out of that, and for a network share it records only the
+  share, so no photo was ever inside the folder. Every one was skipped, and the
+  sync finished with nothing matched and nothing to say about why. The same
+  happened anywhere the database was kept away from the photos. A photo is now
+  found by its path inside the digiKam collection, under the photos folder in
+  Nextcloud, which is how the Memories-to-digiKam half already read them back.
+  ([#1](https://github.com/keithvassallomt/digikam-memories-sync/issues/1))
+
+- A photo to review is shown from Nextcloud when it is not beside the digiKam
+  database, instead of an error saying it is not available locally.
+
 ## [0.3.1] - 2026-10-04
 
 ### Fixed

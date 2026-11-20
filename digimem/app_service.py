@@ -35,7 +35,7 @@ from .apply import (
 from .checkpoint import StateCheckpoint
 from .ledger import StateLedger
 from .models import SyncReport
-from .paths import normalize_path
+from .paths import COLLECTION, normalize_path
 from .nextcloud_http import NextcloudConnectionError, NextcloudHTTP, fetch_file_preview
 from .reverse import compare_memories_to_digikam, selected_memories_faces
 from .settings import DEFAULTS, SettingsStore
@@ -502,11 +502,9 @@ class AppService:
         if issue is None:
             raise ValueError("That library issue is no longer open.")
         # A library issue is found in digiKam alone, so unlike a conflict it
-        # carries no Nextcloud file id. Formats a browser cannot draw are
-        # shown through Nextcloud's preview, which needs one, so it is looked
-        # up here rather than stored against every issue in the library.
-        if Path(str(issue.get("path", ""))).suffix.lower() not in BROWSER_IMAGE_EXTENSIONS:
-            issue = {**issue, "nc_file_id": self._nextcloud_file_id(str(issue["path"]))}
+        # carries no Nextcloud file id. When Nextcloud's preview is needed,
+        # the review looks the file up then, rather than an id being stored
+        # against every issue in the library.
         return self._review_photo(issue, "library issue")
 
     def _nextcloud_file_id(self, relative: str) -> int | None:
@@ -1410,30 +1408,40 @@ class AppService:
         library_value = settings.get("digikam_library")
         if not library_value:
             raise ValueError("The digiKam library location is unavailable.")
+        relative = str(item.get("path", ""))
         library = Path(str(library_value)).expanduser().resolve()
-        photo = (library / str(item.get("path", ""))).resolve()
+        photo = (library / relative).resolve()
         try:
             photo.relative_to(library)
         except ValueError as error:
             raise ValueError(f"The {description} photo path is invalid.") from error
-        if not photo.is_file():
-            raise ValueError(f"The {description} photo is not available locally.")
-        if photo.suffix.lower() not in BROWSER_IMAGE_EXTENSIONS:
-            file_id = item.get("nc_file_id")
-            user_id = str(settings.get("nc_user", ""))
-            password = self.settings.password(user_id)
-            if file_id is None or not user_id or not password:
+        if photo.is_file() and photo.suffix.lower() in BROWSER_IMAGE_EXTENSIONS:
+            content_type = mimetypes.guess_type(photo.name)[0] or "application/octet-stream"
+            if not content_type.startswith("image/"):
+                raise ValueError("The conflict file is not a supported image.")
+            return photo.read_bytes(), content_type
+        # The digiKam folder is where the database lives, which is not always
+        # where the photos are: those can be on another drive or a network
+        # share. A photo that is not there, or that a browser cannot draw, is
+        # shown from Nextcloud's copy instead.
+        file_id = item.get("nc_file_id")
+        if file_id is None:
+            file_id = self._nextcloud_file_id(relative)
+        user_id = str(settings.get("nc_user", ""))
+        password = self.settings.password(user_id)
+        if file_id is None or not user_id or not password:
+            if photo.is_file():
                 raise ValueError("A browser-compatible preview is unavailable.")
-            return fetch_file_preview(
-                str(settings["nextcloud_url"]),
-                user_id,
-                password,
-                int(file_id),
+            raise ValueError(
+                f"The {description} photo was found neither in the digiKam folder "
+                "nor in Nextcloud."
             )
-        content_type = mimetypes.guess_type(photo.name)[0] or "application/octet-stream"
-        if not content_type.startswith("image/"):
-            raise ValueError("The conflict file is not a supported image.")
-        return photo.read_bytes(), content_type
+        return fetch_file_preview(
+            str(settings["nextcloud_url"]),
+            user_id,
+            password,
+            int(file_id),
+        )
 
     def preview(self, payload: dict[str, Any], *, run_id: int | None = None) -> dict[str, Any]:
         settings = self.settings.load()
@@ -1513,11 +1521,11 @@ class AppService:
                     report = self.sync_function(
                         digikam,
                         backend,
+                        # Placed by their path inside the digiKam collection,
+                        # as the reverse pass reads them back, not by where the
+                        # database file happens to be.
                         path_maps=[
-                            (
-                                str(settings["digikam_library"]),
-                                str(settings.get("nc_photos_path", "Photos")),
-                            )
+                            (COLLECTION, str(settings.get("nc_photos_path", "Photos"))),
                         ],
                         apply=False,
                         only_person=person or None,

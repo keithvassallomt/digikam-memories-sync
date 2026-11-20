@@ -126,7 +126,15 @@ In digiKam you can see it under **Settings → Configure digiKam → Database**.
   An app password can be revoked from that same page later without changing
   your real password. DigiMem stores it in your system keychain, not in a file.
 - **Photos folder in Nextcloud** — where your photos live in Nextcloud,
-  usually `Photos`.
+  usually `Photos`. It should hold the same folders as your digiKam
+  collection: a photo digiKam shows in `2024/Beach` should be in
+  `Photos/2024/Beach` in Nextcloud. Where the collection sits on your computer
+  does not matter, so a network share or another drive works, and so does
+  keeping `digikam4.db` somewhere else.
+
+  With more than one digiKam collection, every collection is looked for in
+  this one folder. A photo with the same path in two collections is left out,
+  since DigiMem cannot tell which one Nextcloud has.
 
 ### Testing and finishing
 

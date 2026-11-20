@@ -18,6 +18,7 @@ from .models import (
     SyncReport,
 )
 from .names import person_names_match, sanitize_person_name
+from .paths import is_collection_map
 from .session_state import SessionState
 
 LOG = logging.getLogger(__name__)
@@ -699,6 +700,16 @@ def sync(
             report.files_nextcloud = len(nc_files_cache)
             LOG.info("Nextcloud image files listed: %d", report.files_nextcloud)
 
+        shared_paths: frozenset[str] = frozenset()
+        if any(is_collection_map(source) for source, _target in path_maps):
+            shared_paths = digikam.shared_relative_paths()
+            if shared_paths:
+                LOG.warning(
+                    "%d paths exist in more than one digiKam collection; "
+                    "photos at those paths are left out",
+                    len(shared_paths),
+                )
+
         skip_ids = session.processed_image_ids if session else None
         LOG.info("Starting digiKam batch iterator…")
         for batch in digikam.iter_image_batches(
@@ -719,6 +730,24 @@ def sync(
             report.files_digikam += len(batch)
             report.faces_digikam += batch_faces
 
+            # Two collections with a photo at the same path would both land on
+            # one Nextcloud file. Counted as not found, as the reverse pass
+            # counts the same case.
+            to_resolve = batch
+            if shared_paths:
+                to_resolve = [
+                    im for im in batch if im.relative_path.lower() not in shared_paths
+                ]
+                left_out = len(batch) - len(to_resolve)
+                if left_out:
+                    report.files_unmatched_digikam += left_out
+                    _record_warning(
+                        report,
+                        "Some photos were left out because another digiKam "
+                        "collection has a photo at the same path",
+                        max_warnings=max_warnings,
+                    )
+
             LOG.info(
                 "--- Batch %d / ~%d: digiKam loaded %d images / %d faces ---",
                 batch_num,
@@ -736,13 +765,13 @@ def sync(
                     batch_num,
                     len(batch),
                 )
-                matches, unmatched, nc_by_file = resolve(batch, path_maps)
+                matches, unmatched, nc_by_file = resolve(to_resolve, path_maps)
             else:
                 LOG.info(
                     "Batch %d: matching against listed Nextcloud files…", batch_num
                 )
                 matches, unmatched = match_files(
-                    batch,
+                    to_resolve,
                     nc_files_cache or [],
                     path_maps=path_maps,
                     nc_path_strip=nc_path_prefix,
