@@ -225,8 +225,13 @@ jobs:
         # longer has runners behind it, and a job pointed at it queues for
         # ever rather than failing. Add an Intel leg back when there is a
         # label that actually runs.
+        #
+        # GitHub retired the macOS 14 image on 2026-11-02, after which a job
+        # on macos-14 is cancelled before its first step with "The
+        # configuration 'macos-14-arm64-us-default' is not supported".
+        # macos-15 is the nearest image still offered.
         include:
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
     runs-on: ${{ matrix.runner }}
     env:

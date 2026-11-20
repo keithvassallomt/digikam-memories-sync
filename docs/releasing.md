@@ -44,7 +44,7 @@ changes and stays put when it does not.
 |---|---|---|
 | `.deb`, `.rpm` | `ubuntu-latest` | No bundled Python. Architecture-independent, so one of each covers x86_64 and arm64. |
 | `.AppImage` | `ubuntu:22.04` container | Bundles Python, so the glibc it is built against is the floor it imposes: 2.35. |
-| `.dmg` | `macos-14` | Signed with the Developer ID, notarised by Apple and stapled. Apple Silicon only. |
+| `.dmg` | `macos-15` | Signed with the Developer ID, notarised by Apple and stapled. Apple Silicon only. |
 | `.exe` | `windows-latest` | Unsigned, deliberately. SmartScreen warns; the release notes say so. |
 | companion `.tar.gz` | `ubuntu-latest` | Reproducible — see below. |
 
