@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -34,6 +35,16 @@ class DigiMemHTTPServer(ThreadingHTTPServer):
         super().__init__(address, DigiMemHandler)
         self.app = app
         self.api_token = secrets.token_urlsafe(24)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # The page let go before its answer was written: a reload, or a poll
+        # abandoned on the way to another screen. That is routine, and the
+        # standard handler would print a full traceback for it.
+        error = sys.exc_info()[1]
+        if isinstance(error, ConnectionError):
+            LOG.debug("Page closed the connection before its answer: %s", error)
+            return
+        super().handle_error(request, client_address)
 
 
 class DigiMemHandler(BaseHTTPRequestHandler):
